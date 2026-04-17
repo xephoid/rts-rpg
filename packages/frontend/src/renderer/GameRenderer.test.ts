@@ -97,11 +97,12 @@ describe("GameRenderer lifecycle", () => {
 
     // Start init but don't await — simulate StrictMode cleanup firing immediately
     const initPromise = renderer.init(container);
-    renderer.destroy(); // called before init resolves
+    renderer.destroy(); // called before either await in init() resolves
 
-    // Let init finish (it will call destroy again internally via cancelled flag)
-    await initPromise.catch(() => null);
+    // Let init finish — it should detect destroyed=true and abort cleanly
+    await expect(initPromise).resolves.toBeUndefined();
 
+    // A second destroy call must also be safe
     expect(() => renderer.destroy()).not.toThrow();
   });
 });

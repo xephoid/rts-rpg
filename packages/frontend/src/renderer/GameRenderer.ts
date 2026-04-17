@@ -35,6 +35,7 @@ export class GameRenderer {
   private mapHeightTiles = 0;
   private texturesLoaded = false;
   private initialized = false;
+  private destroyed = false;
 
   private readonly config: RendererConfig;
 
@@ -51,6 +52,8 @@ export class GameRenderer {
       resolution: window.devicePixelRatio || 1,
       autoDensity: true,
     });
+    if (this.destroyed) { this.app.destroy(true); return; }
+
     container.appendChild(this.app.canvas);
 
     this.worldContainer = new Container();
@@ -61,6 +64,8 @@ export class GameRenderer {
 
     this._attachInputHandlers();
     await this._preloadTerrainTextures();
+    if (this.destroyed) return;
+
     this.initialized = true;
   }
 
@@ -226,9 +231,9 @@ export class GameRenderer {
   }
 
   destroy(): void {
+    this.destroyed = true;
     if (!this.initialized) {
-      // init() never completed — PixiJS internals are not set up, nothing to tear down
-      this.app = null;
+      // init() is still in flight or never started — it will see destroyed=true and clean up
       return;
     }
     const canvas = this.app?.canvas as HTMLCanvasElement | undefined;
