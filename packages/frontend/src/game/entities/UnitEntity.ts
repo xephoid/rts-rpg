@@ -42,4 +42,11 @@ export class UnitEntity extends Entity {
     // Concealment-capable units start concealed by default
     if (CONCEALED_TYPES.has(params.typeKey)) this.concealed = true;
   }
+
+  override toSnapshot() {
+    return {
+      ...super.toSnapshot(),
+      carrying: this.carrying,
+    };
+  }
 }

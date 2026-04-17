@@ -43,6 +43,8 @@ export type EntitySnapshot = {
     progressTicks: number;
     totalTicks: number;
   } | null;
+  /** Only set on units currently carrying a gathered resource. */
+  carrying?: { resource: "wood" | "water"; amount: number } | null;
 };
 
 export type TileSnapshot = {

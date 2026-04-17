@@ -114,6 +114,15 @@ export function UnitStatsPanel() {
           </div>
         </div>
 
+        {entity.kind === "unit" && entity.carrying && (
+          <div className={styles.carryRow}>
+            <span className={styles.carryLabel}>Carrying</span>
+            <span className={styles.carryValue}>
+              {entity.carrying.amount} {entity.carrying.resource}
+            </span>
+          </div>
+        )}
+
         {entity.kind === "unit" && (
           <div className={styles.xpRow}>
             <div className={styles.xpLabel}>
