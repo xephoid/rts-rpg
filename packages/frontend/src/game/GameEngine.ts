@@ -2,7 +2,14 @@
 // Pushes GameStateSnapshot to the store bridge after each tick via onTick callback.
 
 import type { Faction, GameStateSnapshot } from "@neither/shared";
-import { startingResources, mapSizes, robotBuildingStats, wizardBuildingStats } from "@neither/shared";
+import {
+  startingResources,
+  mapSizes,
+  robotBuildingStats,
+  wizardBuildingStats,
+  robotUnitStats,
+  wizardUnitStats,
+} from "@neither/shared";
 import { GameLoop } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
 import { EventBus } from "./events/EventBus.js";
@@ -11,8 +18,8 @@ import { SpatialIndex } from "./spatial/SpatialIndex.js";
 import { generateMap, type ResourceDeposit, type MapSize } from "./map/MapGenerator.js";
 import { FogOfWar } from "./fog/FogOfWar.js";
 import { LastSeenMap } from "./fog/LastSeenMap.js";
-import type { UnitEntity } from "./entities/UnitEntity.js";
-import type { BuildingEntity } from "./entities/BuildingEntity.js";
+import { UnitEntity } from "./entities/UnitEntity.js";
+import { BuildingEntity } from "./entities/BuildingEntity.js";
 
 export type GameEngineConfig = {
   mapSize?: MapSize;
@@ -67,7 +74,91 @@ export class GameEngine {
       robots: new LastSeenMap(),
     };
 
+    this._spawnStartingEntities();
     this.loop = new GameLoop(this.tick.bind(this));
+  }
+
+  private _spawnStartingEntities(): void {
+    const [wizPos, robPos] = this.startingPositions;
+    if (!wizPos || !robPos) return;
+
+    // Wizard castle + 3 evokers
+    const wizCastle = new BuildingEntity({
+      faction: "wizards",
+      typeKey: "castle",
+      position: { x: wizPos.x, y: wizPos.y },
+      stats: {
+        maxHp: wizardBuildingStats.castle!.hp,
+        damage: 0,
+        range: wizardBuildingStats.castle!.visionRange,
+        speed: 0,
+        charisma: 0,
+        armor: 0,
+        capacity: wizardBuildingStats.castle!.occupantCapacity,
+      },
+      constructionTicks: 0,
+    });
+    wizCastle.state = { kind: "operational" };
+    this.entities.add(wizCastle);
+
+    const evokerStats = wizardUnitStats.evoker!;
+    for (let i = 0; i < 3; i++) {
+      this.entities.add(
+        new UnitEntity({
+          faction: "wizards",
+          typeKey: "evoker",
+          position: { x: wizPos.x + i - 1, y: wizPos.y + 2 },
+          stats: {
+            maxHp: evokerStats.hp,
+            damage: evokerStats.damage,
+            range: evokerStats.range,
+            speed: evokerStats.speed,
+            charisma: evokerStats.charisma,
+            armor: evokerStats.armor,
+            capacity: evokerStats.capacity,
+          },
+        }),
+      );
+    }
+
+    // Robot home + 3 cores
+    const robHome = new BuildingEntity({
+      faction: "robots",
+      typeKey: "home",
+      position: { x: robPos.x, y: robPos.y },
+      stats: {
+        maxHp: robotBuildingStats.home!.hp,
+        damage: 0,
+        range: robotBuildingStats.home!.visionRange,
+        speed: 0,
+        charisma: 0,
+        armor: 0,
+        capacity: robotBuildingStats.home!.occupantCapacity,
+      },
+      constructionTicks: 0,
+    });
+    robHome.state = { kind: "operational" };
+    this.entities.add(robHome);
+
+    const coreStats = robotUnitStats.core!;
+    for (let i = 0; i < 3; i++) {
+      this.entities.add(
+        new UnitEntity({
+          faction: "robots",
+          typeKey: "core",
+          position: { x: robPos.x + i - 1, y: robPos.y + 2 },
+          stats: {
+            maxHp: coreStats.hpWood,
+            damage: coreStats.damage,
+            range: coreStats.range,
+            speed: coreStats.speed,
+            charisma: coreStats.charisma,
+            armor: coreStats.armorWood,
+            capacity: coreStats.capacity,
+          },
+        }),
+      );
+    }
   }
 
   start(): void {
