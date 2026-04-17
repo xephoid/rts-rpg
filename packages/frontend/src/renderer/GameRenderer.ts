@@ -162,12 +162,17 @@ export class GameRenderer {
   private _attachInputHandlers(): void {
     const canvas = this.app!.canvas as HTMLCanvasElement;
 
+    canvas.addEventListener("contextmenu", this._onContextMenu);
     canvas.addEventListener("wheel", this._onWheel, { passive: false });
     canvas.addEventListener("pointerdown", this._onPointerDown);
     canvas.addEventListener("pointermove", this._onPointerMove);
     canvas.addEventListener("pointerup", this._onPointerUp);
     canvas.addEventListener("pointerleave", this._onPointerUp);
   }
+
+  private readonly _onContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+  };
 
   private readonly _onWheel = (e: WheelEvent): void => {
     e.preventDefault();
@@ -228,6 +233,7 @@ export class GameRenderer {
     }
     const canvas = this.app?.canvas as HTMLCanvasElement | undefined;
     if (canvas) {
+      canvas.removeEventListener("contextmenu", this._onContextMenu);
       canvas.removeEventListener("wheel", this._onWheel);
       canvas.removeEventListener("pointerdown", this._onPointerDown);
       canvas.removeEventListener("pointermove", this._onPointerMove);
