@@ -30,4 +30,5 @@
 .canvas {
   display: block;
   image-rendering: pixelated;
+  cursor: crosshair;
 }
