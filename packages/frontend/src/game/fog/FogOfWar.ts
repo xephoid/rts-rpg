@@ -1,41 +1,36 @@
 // Fog of war — three-state per-tile visibility system.
 // Computed each tick from all friendly unit/building vision ranges.
-// Lives in /game — pure logic, no renderer imports.
 
 import type { Vec2 } from "@neither/shared";
 
 export const enum Visibility {
   UNEXPLORED = 0,
-  EXPLORED = 1, // seen before, not currently visible
+  EXPLORED = 1,
   VISIBLE = 2,
 }
 
 export type FogSnapshot = {
   width: number;
   height: number;
-  /** Flat array [y * width + x] of Visibility values. */
   data: Uint8Array;
 };
 
 export type VisionSource = {
   position: Vec2;
   rangeTiles: number;
-  /** Concealed sources (InfiltrationPlatform, Illusionist) contribute no vision to enemy. */
   concealed?: boolean | undefined;
 };
 
 export class FogOfWar {
   private readonly width: number;
   private readonly height: number;
-  /** Current-tick visibility. */
   private readonly current: Uint8Array;
-  /** Persistent explored state — never shrinks back to UNEXPLORED. */
   private readonly explored: Uint8Array;
 
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
-    this.current = new Uint8Array(width * height); // all UNEXPLORED
+    this.current = new Uint8Array(width * height);
     this.explored = new Uint8Array(width * height);
   }
 
@@ -47,20 +42,10 @@ export class FogOfWar {
     return x >= 0 && x < this.width && y >= 0 && y < this.height;
   }
 
-  /**
-   * Recompute visibility for one tick.
-   * @param sources All friendly (non-concealed) vision contributors.
-   */
   update(sources: VisionSource[]): void {
-    // Reset current-tick visibility to EXPLORED for previously seen tiles,
-    // UNEXPLORED for never-seen tiles.
     for (let i = 0; i < this.current.length; i++) {
-      this.current[i] = this.explored[i] === 1
-        ? Visibility.EXPLORED
-        : Visibility.UNEXPLORED;
+      this.current[i] = this.explored[i] === 1 ? Visibility.EXPLORED : Visibility.UNEXPLORED;
     }
-
-    // Flood visible tiles from each source using circular radius check.
     for (const src of sources) {
       if (src.concealed) continue;
       this._applyCircle(src.position, src.rangeTiles);
@@ -100,12 +85,10 @@ export class FogOfWar {
     return this.getVisibility(x, y) >= Visibility.EXPLORED;
   }
 
-  /** Snapshot for renderer — returns a view into current data (no copy). */
   snapshot(): FogSnapshot {
     return { width: this.width, height: this.height, data: this.current };
   }
 
-  /** Reset to fully unexplored — used when starting a new match. */
   reset(): void {
     this.current.fill(0);
     this.explored.fill(0);

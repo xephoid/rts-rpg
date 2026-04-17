@@ -101,6 +101,7 @@ export class GameEngine {
     });
     wizCastle.state = { kind: "operational" };
     this.entities.add(wizCastle);
+    this._blockBuildingTiles(wizCastle);
 
     const evokerStats = wizardUnitStats.evoker!;
     for (let i = 0; i < 3; i++) {
@@ -140,6 +141,7 @@ export class GameEngine {
     });
     robHome.state = { kind: "operational" };
     this.entities.add(robHome);
+    this._blockBuildingTiles(robHome);
 
     const coreStats = robotUnitStats.core!;
     for (let i = 0; i < 3; i++) {
@@ -183,10 +185,70 @@ export class GameEngine {
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
-    const goal = { x: Math.floor(target.x), y: Math.floor(target.y) };
-    const path = findPath(this.grid, start, goal);
-    if (path === null) return;
-    unit.state = { kind: "moving", targetPosition: target, path };
+
+    // Temporarily block tiles occupied by other units so path routes around them
+    const blockedByUnits: Vec2[] = [];
+    for (const u of this.entities.units()) {
+      if (u.id === entityId) continue;
+      const tx = Math.round(u.position.x);
+      const ty = Math.round(u.position.y);
+      if (!this.grid.isBlocked(tx, ty)) {
+        this.grid.blockTile(tx, ty);
+        blockedByUnits.push({ x: tx, y: ty });
+      }
+    }
+
+    const goal = this._nearestPassable({ x: Math.floor(target.x), y: Math.floor(target.y) }, start);
+    const path = goal ? findPath(this.grid, start, goal) : null;
+
+    for (const pos of blockedByUnits) this.grid.unblockTile(pos.x, pos.y);
+
+    if (!path) return;
+    unit.state = { kind: "moving", targetPosition: goal!, path };
+  }
+
+  /**
+   * If `goal` is impassable, BFS-expand outward to find the nearest passable tile.
+   * Returns null only if no passable tile exists at all (impossible in practice).
+   */
+  private _nearestPassable(goal: Vec2, from: Vec2): Vec2 | null {
+    if (this.grid.isPassable(goal.x, goal.y)) return goal;
+
+    const visited = new Set<string>();
+    const queue: Vec2[] = [goal];
+    visited.add(`${goal.x},${goal.y}`);
+    let best: Vec2 | null = null;
+    let bestDist = Infinity;
+
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      for (const nb of this.grid.neighbours8(cur.x, cur.y)) {
+        const key = `${nb.x},${nb.y}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        if (this.grid.isPassable(nb.x, nb.y)) {
+          const dx = nb.x - from.x;
+          const dy = nb.y - from.y;
+          const dist = dx * dx + dy * dy;
+          if (dist < bestDist) { bestDist = dist; best = nb; }
+        }
+        if (visited.size < 200) queue.push(nb); // limit search radius
+      }
+    }
+    return best;
+  }
+
+  /** Block all tiles in a building's N×N footprint. */
+  private _blockBuildingTiles(building: BuildingEntity): void {
+    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
+    const bx = Math.floor(building.position.x);
+    const by = Math.floor(building.position.y);
+    for (let dy = 0; dy < fp; dy++) {
+      for (let dx = 0; dx < fp; dx++) {
+        this.grid.blockTile(bx + dx, by + dy);
+      }
+    }
   }
 
   private _processMovement(): void {
@@ -204,6 +266,10 @@ export class GameEngine {
 
     while (remaining > 0 && state.path.length > 0) {
       const next = state.path[0]!;
+
+      // Yield if next tile is occupied by another unit — try again next tick
+      if (this._tileOccupiedByUnit(next.x, next.y, unit.id)) break;
+
       const dx = next.x - unit.position.x;
       const dy = next.y - unit.position.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -224,6 +290,14 @@ export class GameEngine {
     if (state.path.length === 0) {
       unit.state = { kind: "idle" };
     }
+  }
+
+  private _tileOccupiedByUnit(x: number, y: number, excludeId: string): boolean {
+    for (const u of this.entities.units()) {
+      if (u.id === excludeId) continue;
+      if (Math.round(u.position.x) === x && Math.round(u.position.y) === y) return true;
+    }
+    return false;
   }
 
   private tick(tick: number, elapsedMs: number): void {

@@ -12,6 +12,7 @@ export class Grid {
   readonly width: number;
   readonly height: number;
   private readonly tiles: Tile[];
+  private readonly blockedTiles = new Set<string>();
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -26,6 +27,23 @@ export class Grid {
 
   private index(x: number, y: number): number {
     return y * this.width + x;
+  }
+
+  private tileKey(x: number, y: number): string {
+    return `${x},${y}`;
+  }
+
+  /** Mark a tile as structurally blocked (e.g. occupied by a building). */
+  blockTile(x: number, y: number): void {
+    this.blockedTiles.add(this.tileKey(x, y));
+  }
+
+  unblockTile(x: number, y: number): void {
+    this.blockedTiles.delete(this.tileKey(x, y));
+  }
+
+  isBlocked(x: number, y: number): boolean {
+    return this.blockedTiles.has(this.tileKey(x, y));
   }
 
   inBounds(x: number, y: number): boolean {
@@ -53,6 +71,7 @@ export class Grid {
   }
 
   isPassable(x: number, y: number): boolean {
+    if (this.blockedTiles.has(this.tileKey(x, y))) return false;
     return this.movementCost(x, y) < Infinity;
   }
 

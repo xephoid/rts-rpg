@@ -3,7 +3,16 @@
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
 import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot } from "@neither/shared";
-import { terrainAssets } from "./assets.js";
+import { robotBuildingStats, wizardBuildingStats } from "@neither/shared";
+import {
+  terrainAssets,
+  unitSpritePath,
+  buildingSpritePath,
+  robotUnitAssets,
+  robotBuildingAssets,
+  wizardUnitAssets,
+  wizardBuildingAssets,
+} from "./assets.js";
 
 export const TILE_SIZE = 64; // pixels at zoom level 1.0
 
@@ -38,7 +47,8 @@ export class GameRenderer {
   private dragStartCamY = 0;
 
   private entityContainer: Container | null = null;
-  private entityGfx: Graphics | null = null;
+  private entitySprites = new Map<string, Sprite>();
+  private selectionGfx: Graphics | null = null;
   private lastEntities: EntitySnapshot[] = [];
   private selectedEntityId: string | null = null;
   private leftDownPos: { x: number; y: number } | null = null;
@@ -88,8 +98,14 @@ export class GameRenderer {
   }
 
   private async _preloadTerrainTextures(): Promise<void> {
-    const entries = Object.entries(terrainAssets);
-    await Promise.all(entries.map(([, path]) => Assets.load(path).catch(() => null)));
+    const allPaths = [
+      ...Object.values(terrainAssets),
+      ...Object.values(robotUnitAssets),
+      ...Object.values(robotBuildingAssets),
+      ...Object.values(wizardUnitAssets),
+      ...Object.values(wizardBuildingAssets),
+    ];
+    await Promise.all(allPaths.map((path) => Assets.load(path).catch(() => null)));
     this.texturesLoaded = true;
   }
 
@@ -115,31 +131,91 @@ export class GameRenderer {
     this.selectedEntityId = id;
   }
 
-  private _renderEntities(entities: EntitySnapshot[]): void {
-    if (!this.entityContainer || !this.app) return;
+  private _getFootprint(entity: EntitySnapshot): number {
+    if (entity.kind !== "building") return 1;
+    const stats =
+      entity.faction === "wizards"
+        ? wizardBuildingStats[entity.typeKey]
+        : robotBuildingStats[entity.typeKey];
+    return stats?.footprintTiles ?? 2;
+  }
 
-    if (!this.entityGfx) {
-      this.entityGfx = new Graphics();
-      this.entityContainer.addChild(this.entityGfx);
+  private _createEntitySprite(entity: EntitySnapshot): Sprite {
+    const path =
+      entity.kind === "building"
+        ? buildingSpritePath(entity.faction, entity.typeKey)
+        : unitSpritePath(entity.faction, entity.typeKey);
+    let sprite: Sprite;
+    try {
+      sprite = path ? Sprite.from(path) : new Sprite();
+    } catch {
+      sprite = new Sprite();
+      sprite.tint = entity.faction === "wizards" ? 0xa855f7 : 0xeab308;
+    }
+    return sprite;
+  }
+
+  private _renderEntities(entities: EntitySnapshot[]): void {
+    if (!this.entityContainer) return;
+
+    if (!this.selectionGfx) {
+      this.selectionGfx = new Graphics();
+      this.entityContainer.addChild(this.selectionGfx);
     }
 
-    this.entityGfx.clear();
-
+    // Add / update entity sprites
+    const currentIds = new Set<string>();
     for (const entity of entities) {
+      currentIds.add(entity.id);
+      const fp = this._getFootprint(entity);
+
+      let sprite = this.entitySprites.get(entity.id);
+      if (!sprite) {
+        sprite = this._createEntitySprite(entity);
+        // Insert before selection gfx so the ring renders on top
+        const ringIdx = this.entityContainer.children.indexOf(this.selectionGfx);
+        this.entityContainer.addChildAt(sprite, ringIdx);
+        this.entitySprites.set(entity.id, sprite);
+      }
+
+      sprite.x = entity.position.x * TILE_SIZE;
+      sprite.y = entity.position.y * TILE_SIZE;
+      sprite.width = fp * TILE_SIZE;
+      sprite.height = fp * TILE_SIZE;
+    }
+
+    // Remove sprites for entities no longer in snapshot
+    for (const [id, sprite] of this.entitySprites) {
+      if (!currentIds.has(id)) {
+        sprite.destroy();
+        this.entitySprites.delete(id);
+      }
+    }
+
+    // Redraw selection ring
+    this.selectionGfx.clear();
+    if (this.selectedEntityId) {
+      const sel = entities.find((e) => e.id === this.selectedEntityId);
+      if (sel) this._drawSelectionRing(sel);
+    }
+  }
+
+  private _drawSelectionRing(entity: EntitySnapshot): void {
+    if (!this.selectionGfx) return;
+    const fp = this._getFootprint(entity);
+    if (entity.kind === "unit") {
       const cx = (entity.position.x + 0.5) * TILE_SIZE;
       const cy = (entity.position.y + 0.5) * TILE_SIZE;
-      const color = entity.faction === "wizards" ? 0xa855f7 : 0xeab308;
-
-      if (entity.kind === "building") {
-        const hw = TILE_SIZE * 0.35;
-        this.entityGfx.rect(cx - hw, cy - hw, hw * 2, hw * 2).fill({ color, alpha: 0.9 });
-      } else {
-        this.entityGfx.circle(cx, cy, TILE_SIZE * 0.28).fill({ color, alpha: 0.9 });
-      }
-
-      if (entity.id === this.selectedEntityId) {
-        this.entityGfx.circle(cx, cy, TILE_SIZE * 0.44).stroke({ color: 0xffffff, width: 2, alpha: 0.9 });
-      }
+      this.selectionGfx
+        .circle(cx, cy, TILE_SIZE * 0.44)
+        .stroke({ color: 0xffffff, width: 2, alpha: 0.9 });
+    } else {
+      const px = entity.position.x * TILE_SIZE - 2;
+      const py = entity.position.y * TILE_SIZE - 2;
+      const sz = fp * TILE_SIZE + 4;
+      this.selectionGfx
+        .rect(px, py, sz, sz)
+        .stroke({ color: 0xffffff, width: 2, alpha: 0.9 });
     }
   }
 
@@ -340,27 +416,31 @@ export class GameRenderer {
     };
   }
 
+  private _hitTest(entity: EntitySnapshot, tileX: number, tileY: number): boolean {
+    const fp = this._getFootprint(entity);
+    if (fp === 1) {
+      const cx = entity.position.x + 0.5;
+      const cy = entity.position.y + 0.5;
+      return (cx - tileX) ** 2 + (cy - tileY) ** 2 < 0.6 ** 2;
+    }
+    return (
+      tileX >= entity.position.x &&
+      tileX < entity.position.x + fp &&
+      tileY >= entity.position.y &&
+      tileY < entity.position.y + fp
+    );
+  }
+
   private _handleLeftClick(screenX: number, screenY: number): void {
     const world = this._screenToWorld(screenX, screenY);
     const tileX = world.x / TILE_SIZE;
     const tileY = world.y / TILE_SIZE;
 
-    let closest: EntitySnapshot | null = null;
-    let closestDist = 0.6; // hit radius in tiles
+    const hit = this.lastEntities.find((e) => this._hitTest(e, tileX, tileY)) ?? null;
 
-    for (const entity of this.lastEntities) {
-      const cx = entity.position.x + 0.5;
-      const cy = entity.position.y + 0.5;
-      const dist = Math.sqrt((cx - tileX) ** 2 + (cy - tileY) ** 2);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closest = entity;
-      }
-    }
-
-    if (closest) {
-      this.selectedEntityId = closest.id;
-      this.config.onEntitySelect?.(closest.id, closest.kind);
+    if (hit) {
+      this.selectedEntityId = hit.id;
+      this.config.onEntitySelect?.(hit.id, hit.kind);
     } else {
       this.selectedEntityId = null;
       this.config.onEntitySelect?.(null, null);
@@ -412,8 +492,10 @@ export class GameRenderer {
     }
     this.fogTexture?.destroy(true);
     this.fogTexture = null;
+    for (const sprite of this.entitySprites.values()) sprite.destroy();
+    this.entitySprites.clear();
+    this.selectionGfx = null;
     this.app?.destroy(true);
     this.app = null;
-    this.entityGfx = null;
   }
 }
