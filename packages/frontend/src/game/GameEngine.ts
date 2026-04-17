@@ -1,42 +1,79 @@
-// Pure TypeScript game simulation engine.
-// No imports from /renderer, /ui, or /store — push state out via callback.
-// TODO: next step — implement tick loop, unit/building registries, event queues
+// Game simulation engine — pure TypeScript, no imports from /renderer, /ui, /store.
+// Pushes GameStateSnapshot to the store bridge after each tick via onTick callback.
 
-import type { GameStateMirror } from "../store/gameStore.js";
+import type { Faction, GameStateSnapshot } from "@neither/shared";
+import { startingResources } from "@neither/shared";
+import { GameLoop } from "./loop/GameLoop.js";
+import { EntityManager } from "./entities/EntityManager.js";
+import { EventBus } from "./events/EventBus.js";
+import { Grid } from "./spatial/Grid.js";
+import { SpatialIndex } from "./spatial/SpatialIndex.js";
+import { mapSizes } from "@neither/shared";
 
 export type GameEngineConfig = {
-  onTick: (state: GameStateMirror) => void;
+  mapSize?: "small" | "medium" | "large";
+  onTick: (state: GameStateSnapshot) => void;
 };
 
-export class GameEngine {
-  private running = false;
-  private tick = 0;
-  private readonly onTick: (state: GameStateMirror) => void;
+export type ResourcePool = { wood: number; water: number; mana: number };
 
-  constructor({ onTick }: GameEngineConfig) {
+export class GameEngine {
+  readonly entities: EntityManager;
+  readonly events: EventBus;
+  readonly grid: Grid;
+  readonly spatialIndex: SpatialIndex;
+
+  private readonly loop: GameLoop;
+  private readonly onTick: (state: GameStateSnapshot) => void;
+
+  private readonly resources: Record<Faction, ResourcePool> = {
+    wizards: { ...startingResources },
+    robots: { ...startingResources },
+  };
+
+  constructor({ mapSize = "medium", onTick }: GameEngineConfig) {
     this.onTick = onTick;
+    this.entities = new EntityManager();
+    this.events = new EventBus();
+    const size = mapSizes[mapSize];
+    this.grid = new Grid(size.widthTiles, size.heightTiles);
+    this.spatialIndex = new SpatialIndex();
+
+    this.loop = new GameLoop(this.tick.bind(this));
   }
 
   start(): void {
-    this.running = true;
-    this.loop();
+    this.loop.start();
   }
 
   stop(): void {
-    this.running = false;
+    this.loop.stop();
   }
 
-  private loop(): void {
-    if (!this.running) return;
-    this.tick++;
+  pause(): void {
+    this.loop.pause();
+  }
 
-    // TODO: next step — run simulation step (movement, combat, resource collection, events)
+  resume(): void {
+    this.loop.resume();
+  }
+
+  private tick(tick: number, elapsedMs: number): void {
+    // Tick processing order per CLAUDE.md:
+    // input → AI → movement → combat → resources → narrative events → render
+    // TODO: Phase 3+ — implement each step
+
+    this.events.flushDeferred();
 
     this.onTick({
-      tick: this.tick,
-      resources: { wood: 150, water: 100, mana: 0 },
+      tick,
+      elapsedMs,
+      resources: {
+        wizards: { ...this.resources.wizards },
+        robots: { ...this.resources.robots },
+      },
+      entities: this.entities.toSnapshots(),
+      tiles: this.grid.toSnapshots(),
     });
-
-    requestAnimationFrame(() => this.loop());
   }
 }

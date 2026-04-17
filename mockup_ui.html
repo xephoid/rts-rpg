@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Neither ___ Nor Gears — UI Mockup v0.2</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Exo+2:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ================================================================
+   THEME VARIABLES
+================================================================ */
+:root {
+  /* Wizard — purple */
+  --a1:       #4c1d95;
+  --a2:       #7c3aed;
+  --a3:       #a855f7;
+  --a4:       #c084fc;
+  --a5:       #ede9fe;
+  --a-rgb:    120, 60, 220;
+  --a3-rgb:   168, 85, 247;
+  --portrait-from: #250d3e;
+  --portrait-to:   #3d1a66;
+  --xp-from:  #5b21b6;
+  --xp-to:    #a855f7;
+}
+.theme-robot {
+  /* Robot — yellow */
+  --a1:       #78350f;
+  --a2:       #ca8a04;
+  --a3:       #eab308;
+  --a4:       #fde047;
+  --a5:       #fefce8;
+  --a-rgb:    202, 138, 4;
+  --a3-rgb:   234, 179, 8;
+  --portrait-from: #1c1000;
+  --portrait-to:   #3d2800;
+  --xp-from:  #92400e;
+  --xp-to:    #eab308;
+}
+
+/* ================================================================
+   PAGE
+================================================================ */
+body {
+  background: #0e0a0f;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 24px;
+  gap: 16px;
+  font-family: 'Exo 2', 'Segoe UI', sans-serif;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 1280px;
+  justify-content: space-between;
+}
+.page-label {
+  color: #5a527a;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-family: 'Exo 2', sans-serif;
+}
+.toggle-btn {
+  display: flex;
+  gap: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  font-family: 'Exo 2', sans-serif;
+}
+.toggle-half {
+  padding: 7px 18px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s, color 0.15s;
+}
+.toggle-wizard {
+  background: rgba(124, 58, 237, 0.55);
+  color: #ede9fe;
+}
+.toggle-robot {
+  background: rgba(255,255,255,0.06);
+  color: #6b7280;
+}
+/* active states set by JS */
+.toggle-wizard.active { background: rgba(124, 58, 237, 0.8);  color: #fff; }
+.toggle-robot.active  { background: rgba(202, 138, 4, 0.8);   color: #fff; }
+.toggle-wizard:not(.active) { background: rgba(255,255,255,0.04); color: #6b7280; }
+.toggle-robot:not(.active)  { background: rgba(255,255,255,0.04); color: #6b7280; }
+
+/* ================================================================
+   GAME CONTAINER
+================================================================ */
+.game {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  overflow: hidden;
+  outline: 1px solid rgba(var(--a-rgb), 0.25);
+  transition: outline-color 0.3s;
+}
+
+/* ================================================================
+   MAP LAYER
+================================================================ */
+.map-layer {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 300px 250px at 28% 68%, #2a4f18 0%, transparent 100%),
+    radial-gradient(ellipse 400px 200px at 55% 55%, #243d12 0%, transparent 100%),
+    radial-gradient(ellipse 200px 300px at 75% 30%, #0f2844 0%, transparent 100%),
+    radial-gradient(ellipse 250px 200px at 10% 25%, #22380f 0%, transparent 100%),
+    linear-gradient(160deg, #1a2210 0%, #151f0e 40%, #18200c 100%);
+}
+
+.forest {
+  position: absolute;
+  background: radial-gradient(circle, #0b1c07 20%, #091408 80%);
+  border-radius: 50%;
+  opacity: 0.85;
+}
+.f1 { width: 160px; height: 120px; top: 240px; left: 480px; border-radius: 60% 40% 55% 45%; }
+.f2 { width: 200px; height: 140px; top: 100px; left: 200px; border-radius: 45% 55% 40% 60%; }
+.f3 { width: 130px; height: 100px; top: 310px; left: 820px; border-radius: 50% 40% 60% 50%; }
+.f4 { width: 90px;  height: 70px;  top: 420px; left: 640px; border-radius: 55% 45% 50% 50%; }
+
+.water {
+  position: absolute;
+  background: radial-gradient(ellipse, #0a1e3c 0%, #081628 100%);
+  border-radius: 40% 60% 55% 45% / 60% 40% 60% 40%;
+}
+.w1 { width: 220px; height: 160px; top: 80px; left: 820px; }
+.w2 { width: 100px; height: 80px;  top: 200px; left: 950px; border-radius: 50%; }
+
+.territory-player {
+  position: absolute;
+  bottom: 220px; left: 60px;
+  width: 280px; height: 200px;
+  border: 1.5px solid rgba(var(--a3-rgb), 0.55);
+  border-radius: 40px;
+  box-shadow: 0 0 18px rgba(var(--a3-rgb), 0.12), inset 0 0 30px rgba(var(--a3-rgb), 0.04);
+  pointer-events: none;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.territory-enemy {
+  position: absolute;
+  top: 90px; left: 130px;
+  width: 200px; height: 150px;
+  border: 1.5px solid rgba(239, 68, 68, 0.45);
+  border-radius: 36px;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.08);
+  pointer-events: none;
+}
+
+.building {
+  position: absolute;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  font-family: 'Exo 2', sans-serif;
+}
+.b-player {
+  background: rgba(var(--a-rgb), 0.35);
+  border: 1px solid rgba(var(--a3-rgb), 0.8);
+  color: var(--a4);
+  box-shadow: 0 0 10px rgba(var(--a3-rgb), 0.25);
+  transition: background 0.3s, border-color 0.3s, color 0.3s, box-shadow 0.3s;
+}
+.b-enemy {
+  background: rgba(120, 20, 20, 0.65);
+  border: 1px solid rgba(239, 68, 68, 0.65);
+  color: #fca5a5;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
+}
+.castle  { width: 42px; height: 42px; bottom: 298px; left: 120px; font-size: 8px; }
+.tower   { width: 26px; height: 32px; bottom: 310px; left: 188px; }
+.cottage { width: 24px; height: 22px; bottom: 283px; left: 228px; font-size: 7px; }
+.e-base  { width: 34px; height: 34px; top: 120px; left: 160px; font-size: 8px; }
+.e-bld2  { width: 22px; height: 20px; top: 138px; left: 214px; font-size: 7px; }
+
+.unit {
+  position: absolute;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 600;
+}
+.u-player {
+  background: rgba(var(--a-rgb), 0.8);
+  border: 1.5px solid var(--a3);
+  color: var(--a5);
+  box-shadow: 0 0 8px rgba(var(--a3-rgb), 0.4);
+  transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+}
+.u-selected {
+  box-shadow: 0 0 0 3px rgba(var(--a3-rgb), 0.6), 0 0 14px rgba(var(--a3-rgb), 0.5);
+  border-color: var(--a4);
+}
+.u-enemy {
+  background: rgba(185, 28, 28, 0.75);
+  border: 1.5px solid #ef4444;
+  color: #fee2e2;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.35);
+}
+.u-gather {
+  background: rgba(30, 100, 160, 0.75);
+  border: 1.5px solid #60a5fa;
+  color: #dbeafe;
+}
+.ev1   { width: 20px; height: 20px; bottom: 346px; left: 250px; }
+.ev2   { width: 20px; height: 20px; bottom: 320px; left: 300px; }
+.surf1 { width: 16px; height: 16px; bottom: 330px; left: 160px; }
+.en1   { width: 16px; height: 16px; top: 168px; left: 220px; }
+.en2   { width: 16px; height: 16px; top: 182px; left: 248px; }
+.ep1   { width: 16px; height: 16px; top: 290px; left: 390px; }
+
+.fog { position: absolute; pointer-events: none; top: 0; left: 0; right: 0; bottom: 225px; }
+
+/* Unexplored — right half + top-right. Solid near-black: player has never been here */
+.fog-unexplored {
+  background: rgb(2, 2, 6);
+  clip-path: polygon(52% 0%, 100% 0%, 100% 100%, 46% 90%, 38% 48%);
+}
+
+/* Explored but not currently visible — upper-left. Semi-transparent grey:
+   player has been here, terrain/buildings show as last seen, no live activity */
+.fog-explored {
+  background: rgba(5, 5, 18, 0.65);
+  clip-path: polygon(0% 0%, 52% 0%, 38% 48%, 0% 55%);
+}
+
+/* Visible zone (no overlay) — lower-left around player base:
+   polygon(0% 55%, 38% 48%, 46% 90%, 0% 100%) — full colour, live activity shown */
+
+/* ================================================================
+   UI LAYER
+================================================================ */
+.ui-layer { position: absolute; inset: 0; pointer-events: none; }
+.ui-layer > * { pointer-events: auto; }
+
+/* ================================================================
+   TOP BAR
+================================================================ */
+.top-bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 44px;
+  background: linear-gradient(180deg, rgba(18,12,24,0.97) 0%, rgba(16,10,22,0.90) 100%);
+  border-bottom: 1px solid rgba(var(--a-rgb), 0.28);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  z-index: 10;
+  transition: border-color 0.3s;
+}
+.faction-badge {
+  padding: 0 16px 0 14px;
+  border-right: 1px solid rgba(var(--a-rgb), 0.2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  transition: border-color 0.3s;
+}
+.faction-crest {
+  width: 24px; height: 24px;
+  background: linear-gradient(135deg, var(--a2), var(--a1));
+  border-radius: 4px;
+  border: 1px solid rgba(var(--a3-rgb), 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: background 0.3s, border-color 0.3s;
+}
+.faction-name {
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  color: var(--a4);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  transition: color 0.3s;
+}
+.resources {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px;
+  flex: 1;
+  justify-content: center;
+}
+.resource {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 14px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.res-icon  { font-size: 13px; line-height: 1; }
+.res-value { font-size: 14px; font-weight: 600; letter-spacing: 0.04em; }
+.res-label { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.5; }
+.r-wood  .res-value { color: #d97706; }
+.r-wood  .res-icon  { color: #92400e; }
+.r-wood  { border-color: rgba(217, 119, 6, 0.2); }
+.r-water .res-value { color: #60a5fa; }
+.r-water .res-icon  { color: #3b82f6; }
+.r-water { border-color: rgba(96, 165, 250, 0.2); }
+.r-mana  .res-value { color: var(--a4); transition: color 0.3s; }
+.r-mana  .res-icon  { color: var(--a3); transition: color 0.3s; }
+.r-mana  { border-color: rgba(var(--a3-rgb), 0.22); transition: border-color 0.3s; }
+
+.top-right {
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-left: 1px solid rgba(var(--a-rgb), 0.2);
+  height: 100%;
+  transition: border-color 0.3s;
+}
+.match-time { font-size: 13px; color: #6b7280; letter-spacing: 0.08em; }
+.diplo-btn {
+  padding: 4px 10px;
+  background: rgba(var(--a-rgb), 0.15);
+  border: 1px solid rgba(var(--a-rgb), 0.35);
+  border-radius: 4px;
+  color: var(--a4);
+  font-size: 12px;
+  font-family: 'Exo 2', sans-serif;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 0.15s, color 0.3s, border-color 0.3s;
+}
+.diplo-btn:hover { background: rgba(var(--a-rgb), 0.28); }
+
+/* ================================================================
+   OBJECTIVES PANEL
+================================================================ */
+.objectives-panel {
+  position: absolute;
+  top: 56px; right: 12px;
+  width: 240px;
+  background: rgba(16, 10, 22, 0.90);
+  border: 1px solid rgba(var(--a-rgb), 0.26);
+  border-radius: 6px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  transition: border-color 0.3s;
+}
+.obj-header {
+  padding: 8px 12px;
+  background: rgba(var(--a-rgb), 0.1);
+  border-bottom: 1px solid rgba(var(--a-rgb), 0.18);
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: var(--a4);
+  text-transform: uppercase;
+  transition: background 0.3s, border-color 0.3s, color 0.3s;
+}
+.objective {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.objective:last-child { border-bottom: none; }
+.obj-type { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 3px; font-weight: 500; }
+.obj-military { color: #f87171; }
+.obj-cultural  { color: var(--a4); transition: color 0.3s; }
+.obj-tech      { color: #34d399; }
+.obj-text { font-size: 12px; color: #b0a8c0; margin-bottom: 6px; line-height: 1.4; }
+.obj-bar-track { height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+.obj-bar-fill  { height: 100%; border-radius: 2px; }
+.obj-military .obj-bar-fill { background: #ef4444; width: 18%; }
+.obj-cultural  .obj-bar-fill { background: var(--a3); width: 41%; transition: background 0.3s; }
+.obj-tech      .obj-bar-fill { background: #10b981; width: 29%; }
+.obj-pct { font-size: 12px; color: #6b7280; text-align: right; margin-top: 3px; }
+
+/* ================================================================
+   ALERT LOG
+================================================================ */
+.alert-log {
+  position: absolute;
+  top: 56px; right: 264px;
+  width: 240px;
+  background: rgba(16, 10, 22, 0.86);
+  border: 1px solid rgba(var(--a-rgb), 0.18);
+  border-radius: 6px;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  transition: border-color 0.3s;
+}
+.alert-header {
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; color: #6b7280;
+}
+.alert-item {
+  padding: 6px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.alert-item:last-child { border-bottom: none; }
+.alert-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+.dot-combat    { background: #ef4444; box-shadow: 0 0 5px rgba(239,68,68,0.7); }
+.dot-convert   { background: var(--a3); box-shadow: 0 0 5px rgba(var(--a3-rgb),0.7); transition: background 0.3s, box-shadow 0.3s; }
+.dot-resource  { background: #f59e0b; box-shadow: 0 0 5px rgba(245,158,11,0.7); }
+.dot-narrative { background: #818cf8; }
+.dot-diplo     { background: #34d399; }
+.alert-text { font-size: 12px; color: #b0a8c0; line-height: 1.35; }
+.alert-text strong { color: #ede8f8; font-weight: 500; }
+.alert-time { font-size: 12px; color: #4b5563; white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; }
+
+/* ================================================================
+   BOTTOM PANEL
+================================================================ */
+.bottom-panel {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 225px;
+  background: linear-gradient(0deg, rgba(16,10,22,0.98) 0%, rgba(18,12,24,0.94) 100%);
+  border-top: 1px solid rgba(var(--a-rgb), 0.30);
+  display: flex;
+  backdrop-filter: blur(12px);
+  transition: border-color 0.3s;
+}
+
+/* Minimap */
+.minimap-section {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(var(--a-rgb), 0.18);
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+.minimap-canvas {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 80px 60px at 30% 70%, #243d14 0%, transparent 100%),
+    radial-gradient(ellipse 60px 40px at 65% 50%, #1e3410 0%, transparent 100%),
+    radial-gradient(ellipse 50px 70px at 78% 28%, #0e1e36 0%, transparent 100%),
+    #121a0c;
+}
+.minimap-territory-p {
+  position: absolute;
+  bottom: 28%; left: 8%; width: 26%; height: 22%;
+  border: 1px solid rgba(var(--a3-rgb), 0.6);
+  border-radius: 4px;
+  transition: border-color 0.3s;
+}
+.minimap-territory-e {
+  position: absolute;
+  top: 15%; left: 14%; width: 20%; height: 18%;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 4px;
+}
+.minimap-unit { position: absolute; width: 3px; height: 3px; border-radius: 50%; }
+.mm-p1 { background: var(--a3); bottom: 42%; left: 20%; transition: background 0.3s; }
+.mm-p2 { background: var(--a3); bottom: 38%; left: 26%; transition: background 0.3s; }
+.mm-e1 { background: #ef4444; top: 22%; left: 24%; }
+.mm-label {
+  position: absolute; bottom: 4px; left: 0; right: 0;
+  text-align: center; font-size: 12px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: #4b5563;
+}
+.minimap-viewbox {
+  position: absolute;
+  top: 25%; left: 5%; width: 60%; height: 52%;
+  border: 1px solid rgba(255,255,255,0.2);
+  pointer-events: none;
+}
+
+/* Unit info */
+.unit-info-section {
+  width: 310px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(var(--a-rgb), 0.18);
+  padding: 12px;
+  display: flex;
+  gap: 12px;
+  transition: border-color 0.3s;
+}
+.portrait-frame {
+  width: 80px; height: 80px;
+  flex-shrink: 0;
+  border: 1px solid rgba(var(--a3-rgb), 0.55);
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--portrait-from) 0%, var(--portrait-to) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 22px rgba(var(--a3-rgb), 0.28), inset 0 0 16px rgba(0,0,0,0.4);
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s, background 0.3s, box-shadow 0.3s;
+}
+.portrait-glyph { font-size: 38px; line-height: 1; opacity: 0.9; }
+.portrait-level {
+  position: absolute; bottom: 3px; right: 4px;
+  font-size: 12px; color: var(--a4); font-weight: 600; letter-spacing: 0.05em;
+  transition: color 0.3s;
+}
+.unit-stats { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.unit-name  { font-family: 'Cinzel', serif; font-size: 13px; color: #ede9fe; letter-spacing: 0.06em; line-height: 1; margin-bottom: 2px; }
+.unit-type  { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--a3); margin-bottom: 4px; transition: color 0.3s; }
+.hp-bar { width: 100%; }
+.bar-label { display: flex; justify-content: space-between; margin-bottom: 2px; }
+.bar-label span:first-child { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; }
+.bar-label span:last-child  { font-size: 12px; color: #d1fae5; font-weight: 500; }
+.bar-track { height: 5px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+.bar-fill-hp { height: 100%; border-radius: 3px; background: linear-gradient(90deg, #16a34a, #4ade80); }
+.bar-fill-xp { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--xp-from), var(--xp-to)); transition: background 0.3s; }
+.hp-fill { width: 100%; }
+.xp-fill { width: 70%; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px; margin-top: 2px; }
+.stat-cell { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 3px; padding: 3px 5px; }
+.stat-cell-label { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #4b5563; line-height: 1; margin-bottom: 2px; }
+.stat-cell-val   { font-size: 12px; color: var(--a4); font-weight: 600; transition: color 0.3s; }
+
+/* Abilities */
+.detail-section {
+  width: 320px;
+  flex-shrink: 0;
+  border-right: 1px solid rgba(var(--a-rgb), 0.18);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.3s;
+}
+.detail-header {
+  font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; color: #4b5563;
+  margin-bottom: 4px; padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.spell-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 7px; border-radius: 4px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.spell-row.active {
+  background: rgba(var(--a-rgb), 0.1);
+  border-color: rgba(var(--a-rgb), 0.3);
+  transition: background 0.3s, border-color 0.3s;
+}
+.spell-row.locked { opacity: 0.35; }
+.spell-icon {
+  width: 26px; height: 26px; border-radius: 4px;
+  background: rgba(var(--a-rgb), 0.28);
+  border: 1px solid rgba(var(--a3-rgb), 0.4);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; flex-shrink: 0;
+  transition: background 0.3s, border-color 0.3s;
+}
+.spell-row.locked .spell-icon { background: rgba(60,60,80,0.3); border-color: rgba(100,100,130,0.3); }
+.spell-info { flex: 1; }
+.spell-name { font-size: 12px; color: #e2ddf0; font-weight: 500; margin-bottom: 2px; }
+.spell-row.locked .spell-name { color: #6b7280; }
+.spell-desc { font-size: 12px; color: #8878a0; line-height: 1.3; }
+.spell-cost { font-size: 12px; color: var(--a3); font-weight: 600; white-space: nowrap; transition: color 0.3s; }
+.spell-row.locked .spell-cost { color: #4b5563; }
+.locked-badge { font-size: 12px; color: #4b5563; letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* Action buttons */
+.action-section {
+  flex: 1;
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.action-header { font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; color: #4b5563; padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.action-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.action-btn {
+  aspect-ratio: 1; border-radius: 5px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.action-btn:hover {
+  background: rgba(var(--a-rgb), 0.15);
+  border-color: rgba(var(--a3-rgb), 0.4);
+}
+.action-btn.spell {
+  background: rgba(var(--a-rgb), 0.12);
+  border-color: rgba(var(--a-rgb), 0.3);
+  transition: background 0.3s, border-color 0.3s;
+}
+.action-btn.spell:hover {
+  background: rgba(var(--a-rgb), 0.28);
+  border-color: rgba(var(--a3-rgb), 0.6);
+}
+.action-btn.disabled { opacity: 0.25; cursor: default; }
+.action-btn.disabled:hover { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.1); }
+.action-icon  { font-size: 22px; line-height: 1; }
+.action-label { font-size: 12px; letter-spacing: 0.08em; color: #9ca3af; text-transform: uppercase; }
+.action-key   { font-size: 12px; color: #4b5563; letter-spacing: 0.05em; }
+
+/* ================================================================
+   NOTES
+================================================================ */
+.notes {
+  width: 1280px;
+  background: rgba(10, 12, 24, 0.8);
+  border: 1px solid rgba(100, 80, 160, 0.2);
+  border-radius: 6px;
+  padding: 20px 24px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+}
+.note-section h3 {
+  font-family: 'Cinzel', serif;
+  font-size: 12px; letter-spacing: 0.15em; color: #7c3aed;
+  text-transform: uppercase; margin-bottom: 10px; padding-bottom: 6px;
+  border-bottom: 1px solid rgba(120,60,220,0.2);
+}
+.note-section ul { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.note-section li { font-size: 12px; color: #6b7280; line-height: 1.4; padding-left: 10px; position: relative; }
+.note-section li::before { content: '—'; position: absolute; left: 0; color: #4b5563; }
+.note-section li strong { color: #9ca3af; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <p class="page-label" id="pageLabel">Neither ___ Nor Gears · UI Mockup v0.2 · Wizard faction</p>
+  <div class="toggle-btn">
+    <button class="toggle-half toggle-wizard active" onclick="setTheme('wizard')">⚗ Wizards</button>
+    <button class="toggle-half toggle-robot"         onclick="setTheme('robot')">⚙ Robots</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     GAME SCREEN
+============================================================ -->
+<div class="game" id="game">
+
+  <!-- MAP LAYER -->
+  <div class="map-layer">
+    <div class="forest f1"></div>
+    <div class="forest f2"></div>
+    <div class="forest f3"></div>
+    <div class="forest f4"></div>
+    <div class="water w1"></div>
+    <div class="water w2"></div>
+    <div class="territory-player"></div>
+    <div class="territory-enemy"></div>
+    <div class="building b-player castle"  id="bldMain"></div>
+    <div class="building b-player tower"   id="bldSec"></div>
+    <div class="building b-player cottage" id="bldPop"></div>
+    <div class="building b-enemy e-base">BASE</div>
+    <div class="building b-enemy e-bld2">BLD</div>
+    <div class="unit u-player u-selected ev1" id="unit1">E</div>
+    <div class="unit u-player ev2"            id="unit2">E</div>
+    <div class="unit u-gather surf1"          id="unit3">S</div>
+    <div class="unit u-enemy en1">E</div>
+    <div class="unit u-enemy en2">E</div>
+    <div class="unit u-enemy ep1">E</div>
+    <div class="fog fog-unexplored"></div>
+    <div class="fog fog-explored"></div>
+  </div>
+
+  <!-- UI LAYER -->
+  <div class="ui-layer">
+
+    <!-- TOP BAR -->
+    <div class="top-bar">
+      <div class="faction-badge">
+        <div class="faction-crest" id="factionCrest">✦</div>
+        <span class="faction-name" id="factionName">The Arcane Order</span>
+      </div>
+      <div class="resources">
+        <div class="resource r-wood">
+          <span class="res-icon">🪵</span>
+          <div><div class="res-value">350</div><div class="res-label">Wood</div></div>
+        </div>
+        <div class="resource r-water">
+          <span class="res-icon">💧</span>
+          <div><div class="res-value">180</div><div class="res-label">Water</div></div>
+        </div>
+        <div class="resource r-mana" id="manaResource">
+          <span class="res-icon" id="manaIcon">◆</span>
+          <div><div class="res-value" id="manaValue">240</div><div class="res-label" id="manaLabel">Mana</div></div>
+        </div>
+      </div>
+      <div class="top-right">
+        <span class="match-time">12:47</span>
+        <button class="diplo-btn">Diplomacy</button>
+      </div>
+    </div>
+
+    <!-- OBJECTIVES -->
+    <div class="objectives-panel">
+      <div class="obj-header">Active Objectives</div>
+      <div class="objective obj-military">
+        <div class="obj-type">⚔ Military</div>
+        <div class="obj-text">Eliminate all opposing faction leaders</div>
+        <div class="obj-bar-track"><div class="obj-bar-fill"></div></div>
+        <div class="obj-pct">18%</div>
+      </div>
+      <div class="objective obj-cultural">
+        <div class="obj-type">✦ Cultural</div>
+        <div class="obj-text">Grow civilian roster to max XP</div>
+        <div class="obj-bar-track"><div class="obj-bar-fill"></div></div>
+        <div class="obj-pct">41%</div>
+      </div>
+      <div class="objective obj-tech">
+        <div class="obj-type">⚙ Technological</div>
+        <div class="obj-text">Construct all units and buildings</div>
+        <div class="obj-bar-track"><div class="obj-bar-fill"></div></div>
+        <div class="obj-pct">29%</div>
+      </div>
+    </div>
+
+    <!-- ALERT LOG -->
+    <div class="alert-log">
+      <div class="alert-header">Recent Events</div>
+      <div class="alert-item">
+        <div class="alert-dot dot-combat"></div>
+        <div class="alert-text"><strong id="alertUnit">Evoker</strong> under attack near eastern forest</div>
+        <div class="alert-time">0:14</div>
+      </div>
+      <div class="alert-item">
+        <div class="alert-dot dot-narrative"></div>
+        <div class="alert-text">Quest available: <strong>Broker a peace with the Rebellion</strong></div>
+        <div class="alert-time">1:02</div>
+      </div>
+      <div class="alert-item">
+        <div class="alert-dot dot-resource"></div>
+        <div class="alert-text">Wood supply running <strong>low</strong> at northern deposit</div>
+        <div class="alert-time">2:31</div>
+      </div>
+      <div class="alert-item">
+        <div class="alert-dot dot-diplo"></div>
+        <div class="alert-text"><strong>Rebellion Wizards</strong> alignment improved</div>
+        <div class="alert-time">3:45</div>
+      </div>
+    </div>
+
+    <!-- BOTTOM PANEL -->
+    <div class="bottom-panel">
+
+      <div class="minimap-section">
+        <div class="minimap-canvas">
+          <div class="minimap-territory-p"></div>
+          <div class="minimap-territory-e"></div>
+          <div class="minimap-unit mm-p1"></div>
+          <div class="minimap-unit mm-p2"></div>
+          <div class="minimap-unit mm-e1"></div>
+          <div class="minimap-viewbox"></div>
+        </div>
+        <div class="mm-label">Minimap</div>
+      </div>
+
+      <div class="unit-info-section">
+        <div class="portrait-frame">
+          <span class="portrait-glyph" id="portraitGlyph">🧙</span>
+          <span class="portrait-level">Lv 3</span>
+        </div>
+        <div class="unit-stats">
+          <div class="unit-name"  id="unitName">Evoker</div>
+          <div class="unit-type" id="unitType">Combat · Wizard</div>
+          <div class="hp-bar">
+            <div class="bar-label"><span>HP</span><span id="hpVal">120 / 120</span></div>
+            <div class="bar-track"><div class="bar-fill-hp hp-fill"></div></div>
+          </div>
+          <div class="hp-bar">
+            <div class="bar-label"><span>XP</span><span>45 / 64</span></div>
+            <div class="bar-track"><div class="bar-fill-xp xp-fill"></div></div>
+          </div>
+          <div class="stat-grid">
+            <div class="stat-cell"><div class="stat-cell-label">Range</div><div class="stat-cell-val" id="statRange">6</div></div>
+            <div class="stat-cell"><div class="stat-cell-label">Speed</div><div class="stat-cell-val" id="statSpeed">2</div></div>
+            <div class="stat-cell"><div class="stat-cell-label">Armor</div><div class="stat-cell-val" id="statArmor">2</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-header" id="abilityHeader">Abilities</div>
+        <div id="abilityList">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <div class="action-section">
+        <div class="action-header">Commands</div>
+        <div class="action-grid">
+          <div class="action-btn"><span class="action-icon">↗</span><span class="action-label">Move</span><span class="action-key">[M]</span></div>
+          <div class="action-btn"><span class="action-icon">⚔</span><span class="action-label">Attack</span><span class="action-key">[A]</span></div>
+          <div class="action-btn"><span class="action-icon">⊙</span><span class="action-label">Defend</span><span class="action-key">[D]</span></div>
+          <div class="action-btn"><span class="action-icon">⟲</span><span class="action-label">Patrol</span><span class="action-key">[P]</span></div>
+          <div class="action-btn"><span class="action-icon">◼</span><span class="action-label">Stop</span><span class="action-key">[S]</span></div>
+          <div class="action-btn spell" id="ability1Btn"><span class="action-icon" id="ability1Icon">⚡</span><span class="action-label" id="ability1Label">Missiles</span><span class="action-key">[W]</span></div>
+          <div class="action-btn spell" id="ability2Btn"><span class="action-icon" id="ability2Icon">🛡</span><span class="action-label" id="ability2Label">M.Shield</span><span class="action-key">[E]</span></div>
+          <div class="action-btn disabled"><span class="action-icon">—</span><span class="action-label">—</span></div>
+        </div>
+      </div>
+
+    </div><!-- /bottom-panel -->
+
+  </div><!-- /ui-layer -->
+</div><!-- /game -->
+
+<!-- DESIGN NOTES -->
+<div class="notes">
+  <div class="note-section">
+    <h3>Confirmed Colors</h3>
+    <ul>
+      <li><strong>Wizards:</strong> Purple #7c3aed → #c084fc</li>
+      <li><strong>Robots:</strong> Yellow #ca8a04 → #fde047</li>
+      <li><strong>Enemy units:</strong> Red (faction-agnostic)</li>
+      <li><strong>Wood resource:</strong> Amber #d97706 (both factions)</li>
+      <li><strong>Water resource:</strong> Sky blue #60a5fa (both factions)</li>
+      <li><strong>Mana:</strong> Faction accent color (wizard only)</li>
+    </ul>
+  </div>
+  <div class="note-section">
+    <h3>Fog of War — 3 States</h3>
+    <ul>
+      <li><strong>Visible (clear):</strong> within vision range of a friendly unit/building — full colour, live activity</li>
+      <li><strong>Explored (grey overlay):</strong> previously visited but no current vision — terrain and buildings show as last seen, no live units</li>
+      <li><strong>Unexplored (black):</strong> never visited — completely hidden</li>
+      <li>Territory boundary lines visible in explored + visible zones</li>
+      <li>Spy units not revealed in explored/visible unless a detector unit is in range</li>
+    </ul>
+  </div>
+  <div class="note-section">
+    <h3>Open Questions for Zeke</h3>
+    <ul>
+      <li>Bottom panel height — right or adjust?</li>
+      <li>Objectives right side — or somewhere else?</li>
+      <li>Alert log upper-right — good placement?</li>
+      <li>Dialogue: centered modal (shown earlier) vs bottom bar?</li>
+      <li>Minimap corner — bottom-left correct?</li>
+      <li>Robot third resource slot: leave empty or show unit count?</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+const themes = {
+  wizard: {
+    factionCrest: '✦',
+    factionName:  'The Arcane Order',
+    portraitGlyph: '🧙',
+    unitName:  'Evoker',
+    unitType:  'Combat · Wizard',
+    hpVal:     '120 / 120',
+    statRange: '6', statSpeed: '2', statArmor: '2',
+    unit1Label: 'E', unit2Label: 'E', unit3Label: 'S',
+    bldMain: 'CASTLE', bldSec: 'TWR', bldPop: 'COT',
+    alertUnit: 'Evoker',
+    showMana: true,
+    abilities: [
+      { icon: '⚡', name: 'Wizard Missiles', desc: 'Long range. Low damage. Default attack.', cost: '8 ◆', locked: false },
+      { icon: '🛡', name: 'Mana Shield',     desc: 'Converts incoming damage to mana cost.',  cost: '5/s ◆', locked: false },
+      { icon: '❄',  name: 'Ice Blast',        desc: 'Slows target 50% for 4 seconds.',          cost: '20 ◆', locked: true },
+      { icon: '🔥', name: 'Fiery Explosion',  desc: 'High damage, small splash radius.',         cost: '50 ◆', locked: true },
+    ],
+    ability1: { icon: '⚡', label: 'Missiles' },
+    ability2: { icon: '🛡', label: 'M.Shield' },
+  },
+  robot: {
+    factionCrest: '⚙',
+    factionName:  'The Iron Works',
+    portraitGlyph: '🤖',
+    unitName:  'Spitter',
+    unitType:  'Ranged · Robot',
+    hpVal:     '70 / 70',
+    statRange: '5', statSpeed: '2', statArmor: '0',
+    unit1Label: 'SP', unit2Label: 'SP', unit3Label: 'WC',
+    bldMain: 'HOME', bldSec: 'ICP', bldPop: 'RCH',
+    alertUnit: 'Spitter',
+    showMana: false,
+    abilities: [
+      { icon: '💨', name: 'Debris Shot',   desc: 'Ranged attack. Fires over walls.',         cost: '—', locked: false },
+      { icon: '⬆',  name: 'Overclock',     desc: 'Temporarily boosts speed. Cooldown 8s.',   cost: '—', locked: false },
+      { icon: '💥', name: 'Burst Fire',    desc: 'Fires 3 rapid shots. Researched upgrade.',  cost: '—', locked: true },
+      { icon: '🔧', name: 'Self-Repair',   desc: 'Restores 15 HP over 5 seconds.',            cost: '—', locked: true },
+    ],
+    ability1: { icon: '💨', label: 'Debris' },
+    ability2: { icon: '⬆',  label: 'Overclock' },
+  }
+};
+
+function setTheme(name) {
+  const t = themes[name];
+  const game = document.getElementById('game');
+
+  // CSS theme class
+  game.classList.toggle('theme-robot', name === 'robot');
+
+  // Toggle buttons
+  document.querySelector('.toggle-wizard').classList.toggle('active', name === 'wizard');
+  document.querySelector('.toggle-robot').classList.toggle('active', name === 'robot');
+
+  // Page label
+  document.getElementById('pageLabel').textContent =
+    `Neither ___ Nor Gears · UI Mockup v0.2 · ${name === 'wizard' ? 'Wizard' : 'Robot'} faction`;
+
+  // Top bar
+  document.getElementById('factionCrest').textContent = t.factionCrest;
+  document.getElementById('factionName').textContent  = t.factionName;
+  document.getElementById('manaResource').style.display = t.showMana ? '' : 'none';
+
+  // Map units & buildings
+  document.getElementById('unit1').textContent = t.unit1Label;
+  document.getElementById('unit2').textContent = t.unit2Label;
+  document.getElementById('unit3').textContent = t.unit3Label;
+  document.getElementById('bldMain').textContent = t.bldMain;
+  document.getElementById('bldSec').textContent  = t.bldSec;
+  document.getElementById('bldPop').textContent  = t.bldPop;
+
+  // Alert
+  document.getElementById('alertUnit').textContent = t.alertUnit;
+
+  // Info panel
+  document.getElementById('portraitGlyph').textContent = t.portraitGlyph;
+  document.getElementById('unitName').textContent  = t.unitName;
+  document.getElementById('unitType').textContent  = t.unitType;
+  document.getElementById('hpVal').textContent     = t.hpVal;
+  document.getElementById('statRange').textContent = t.statRange;
+  document.getElementById('statSpeed').textContent = t.statSpeed;
+  document.getElementById('statArmor').textContent = t.statArmor;
+
+  // Ability list
+  const list = document.getElementById('abilityList');
+  list.innerHTML = t.abilities.map(a => `
+    <div class="spell-row ${a.locked ? 'locked' : 'active'}">
+      <div class="spell-icon">${a.icon}</div>
+      <div class="spell-info">
+        <div class="spell-name">${a.name}</div>
+        <div class="spell-desc">${a.desc}</div>
+      </div>
+      ${a.locked
+        ? '<div class="locked-badge">Research</div>'
+        : `<div class="spell-cost">${a.cost}</div>`}
+    </div>`).join('');
+
+  // Action button abilities
+  document.getElementById('ability1Icon').textContent  = t.ability1.icon;
+  document.getElementById('ability1Label').textContent = t.ability1.label;
+  document.getElementById('ability2Icon').textContent  = t.ability2.icon;
+  document.getElementById('ability2Label').textContent = t.ability2.label;
+}
+
+// Init
+setTheme('wizard');
+</script>
+</body>
+</html>
