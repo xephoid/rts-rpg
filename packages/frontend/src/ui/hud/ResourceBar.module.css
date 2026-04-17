@@ -14,44 +14,6 @@
   z-index: 10;
 }
 
-.factionToggle {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.factionBtn {
-  padding: 3px 10px;
-  border-radius: 3px;
-  border: 1px solid transparent;
-  background: transparent;
-  font-family: var(--font-header);
-  font-size: var(--font-size-min);
-  cursor: pointer;
-  color: #9ca3af;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.factionBtnWizard.active {
-  color: var(--color-wizard-light);
-  border-color: var(--color-wizard-mid);
-}
-
-.factionBtnRobot.active {
-  color: var(--color-robot-light);
-  border-color: var(--color-robot-mid);
-}
-
-.factionBtn:not(.active):hover {
-  color: #d1d5db;
-}
-
-.divider {
-  width: 1px;
-  height: 24px;
-  background: var(--color-panel-border);
-  flex-shrink: 0;
-}
 
 .resources {
   display: flex;
