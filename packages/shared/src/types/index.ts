@@ -20,6 +20,14 @@ export type StatBlock = {
   level: number;
 };
 
+export type DepositSnapshot = {
+  id: string;
+  kind: "wood" | "water";
+  position: Vec2;
+  /** Remaining quantity. Finite for both wood and water. */
+  quantity: number;
+};
+
 export type EntitySnapshot = {
   id: string;
   kind: EntityKind;
@@ -27,6 +35,14 @@ export type EntitySnapshot = {
   typeKey: string;
   position: Vec2;
   stats: StatBlock;
+  isNamed: boolean;
+  name: string | null;
+  /** Only set on buildings currently in production state. */
+  productionProgress?: {
+    unitTypeKey: string;
+    progressTicks: number;
+    totalTicks: number;
+  } | null;
 };
 
 export type TileSnapshot = {
@@ -53,4 +69,8 @@ export type GameStateSnapshot = {
   tiles: TileSnapshot[];
   /** Per-faction fog — only the player's own faction fog is sent to each client. */
   fog: Record<Faction, FogSnapshot>;
+  /** Live unit count vs. population cap per faction. */
+  population: Record<Faction, { count: number; cap: number }>;
+  /** All non-exhausted resource deposits (fog-filtered by renderer). */
+  deposits: DepositSnapshot[];
 };

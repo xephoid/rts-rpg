@@ -30,11 +30,29 @@ vi.mock("pixi.js", () => {
     static load = vi.fn().mockResolvedValue(undefined);
   }
 
+  class MockGraphics {
+    clear = vi.fn().mockReturnThis();
+    circle = vi.fn().mockReturnThis();
+    rect = vi.fn().mockReturnThis();
+    fill = vi.fn().mockReturnThis();
+    stroke = vi.fn().mockReturnThis();
+    destroy = vi.fn();
+  }
+
+  class MockRenderTexture {
+    width = 0;
+    height = 0;
+    static create = vi.fn(() => new MockRenderTexture());
+    destroy = vi.fn();
+  }
+
   return {
     Application: MockApplication,
     Container: MockContainer,
-    Sprite: { from: vi.fn(() => ({ x: 0, y: 0, width: 0, height: 0, tint: 0 })) },
+    Sprite: { from: vi.fn(() => ({ x: 0, y: 0, width: 0, height: 0, tint: 0, destroy: vi.fn() })) },
     Assets: MockAssets,
+    Graphics: MockGraphics,
+    RenderTexture: MockRenderTexture,
   };
 });
 

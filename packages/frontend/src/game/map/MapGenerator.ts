@@ -3,7 +3,7 @@
 
 import { createNoise2D } from "simplex-noise";
 import type { TerrainType, Vec2 } from "@neither/shared";
-import { woodDeposit, mapSizes } from "@neither/shared";
+import { woodDeposit, waterDeposit, mapSizes } from "@neither/shared";
 import type { Grid } from "../spatial/Grid.js";
 
 export type MapSize = "small" | "medium" | "large";
@@ -154,7 +154,7 @@ export function generateMap(grid: Grid, options: MapGeneratorOptions): Omit<Gene
         id: `deposit_water_${depositIndex++}`,
         kind: "water",
         position: { x, y },
-        quantity: Infinity, // water sources are inexhaustible
+        quantity: waterDeposit.quantityMin + Math.floor(rng() * (waterDeposit.quantityMax - waterDeposit.quantityMin + 1)),
       });
     }
   }

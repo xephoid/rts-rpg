@@ -11,9 +11,19 @@ export type StatBlockInit = {
   capacity: number;
 };
 
+export type LevelUpBonus = {
+  hpPct: number;
+  damagePct: number;
+  armorPct: number;
+  speedPct: number;
+  charismaPct: number;
+  rangePct: number;
+  capacityPct: number;
+};
+
 export class StatBlock {
   hp: number;
-  readonly maxHp: number;
+  maxHp: number;
   damage: number;
   range: number;
   speed: number;
@@ -60,6 +70,21 @@ export class StatBlock {
       return true;
     }
     return false;
+  }
+
+  /** Apply level-up stat bonuses (percentage increases per role). */
+  applyLevelUp(bonus: LevelUpBonus): void {
+    if (bonus.hpPct > 0) {
+      const hpGain = Math.round(this.maxHp * bonus.hpPct / 100);
+      this.maxHp += hpGain;
+      this.hp = Math.min(this.hp + hpGain, this.maxHp);
+    }
+    if (bonus.damagePct > 0) this.damage = Math.max(1, Math.round(this.damage * (1 + bonus.damagePct / 100)));
+    if (bonus.armorPct > 0) this.armor = Math.round(this.armor * (1 + bonus.armorPct / 100));
+    if (bonus.speedPct > 0) this.speed = Math.round(this.speed * (1 + bonus.speedPct / 100) * 10) / 10;
+    if (bonus.charismaPct > 0) this.charisma = Math.round(this.charisma * (1 + bonus.charismaPct / 100));
+    if (bonus.rangePct > 0) this.range = Math.round(this.range * (1 + bonus.rangePct / 100) * 10) / 10;
+    if (bonus.capacityPct > 0) this.capacity = Math.round(this.capacity * (1 + bonus.capacityPct / 100));
   }
 
   toSnapshot(): {

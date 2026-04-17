@@ -4,7 +4,10 @@ import type { StatBlockInit } from "./StatBlock.js";
 
 export type UnitState =
   | { kind: "idle" }
-  | { kind: "moving"; targetPosition: Vec2; path: Vec2[] }
+  | { kind: "moving"; targetPosition: Vec2; path: Vec2[]; yieldTicks: number }
+  | { kind: "patrolling"; pointA: Vec2; pointB: Vec2; path: Vec2[]; heading: "toB" | "toA"; yieldTicks: number }
+  | { kind: "gatherMove"; depositId: string; path: Vec2[]; yieldTicks: number }
+  | { kind: "dropoffMove"; resource: "wood" | "water"; depositId: string; dropoffId: string; path: Vec2[]; yieldTicks: number }
   | { kind: "attacking"; targetId: string }
   | { kind: "gathering"; depositId: string }
   | { kind: "constructing"; buildingId: string }
@@ -31,6 +34,8 @@ export class UnitEntity extends Entity {
     typeKey: string;
     position: Vec2;
     stats: StatBlockInit;
+    isNamed?: boolean;
+    name?: string | null;
   }) {
     super({ ...params, kind: "unit" });
     this.isDetector = DETECTOR_TYPES.has(params.typeKey);

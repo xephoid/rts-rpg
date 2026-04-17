@@ -1,11 +1,29 @@
 // Building stats for all building types.
 // Values marked "Initial guess" — update to "Confirmed" after playtesting sign-off.
 
+/** Maps building typeKey → list of unit typeKeys it can produce. */
+export const buildingProduction: Record<string, string[]> = {
+  // Robot buildings
+  home:                  ["core"],
+  rechargeStation:       ["waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform", "probePlatform"],
+  combatFrameProduction: ["spinnerPlatform", "spitterPlatform", "largeCombatPlatform", "infiltrationPlatform", "wallPlatform"],
+  // Wizard buildings
+  castle:                ["subject", "surf"],
+  libraryOfEvocation:    ["evoker"],
+  libraryOfIllusion:     ["illusionist"],
+  libraryOfEnchantment:  ["enchantress"],
+  dragonHoard:           ["dragon"],
+  temple:                ["cleric"],
+  embassy:               ["archmage"],
+};
+
 export type BuildingStatBlock = {
   hp: number;
   occupantCapacity: number;
   visionRange: number; // tiles
   footprintTiles: number; // N×N tile footprint
+  /** Population slots this building contributes toward the faction cap. */
+  populationSupport: number;
 };
 
 // ── Robot buildings ───────────────────────────────────────────────────────────
@@ -17,6 +35,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 6,
     visionRange: 5,
     footprintTiles: 4,
+    populationSupport: 8, // Initial guess: main base supports 8 units.
   },
   rechargeStation: {
     // Initial guess: healing/recharge facility.
@@ -24,6 +43,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 3,
     footprintTiles: 2,
+    populationSupport: 4, // Initial guess: barracks-equivalent.
   },
   immobileCombatPlatform: {
     // Initial guess: defensive tower — high HP, long vision.
@@ -31,6 +51,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 1,
     visionRange: 8,
     footprintTiles: 1,
+    populationSupport: 0,
   },
   waterExtractor: {
     // Initial guess: resource building — moderate HP.
@@ -38,6 +59,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 1,
     visionRange: 3,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   woodStorage: {
     // Initial guess: storage — low HP, no vision bonus.
@@ -45,6 +67,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 0,
     visionRange: 2,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   combatFrameProduction: {
     // Initial guess: unit production building.
@@ -52,6 +75,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 3,
+    populationSupport: 4,
   },
   combatResearchStation: {
     // Initial guess: research building.
@@ -59,6 +83,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   diplomaticResearchStation: {
     // Initial guess: diplomacy building.
@@ -66,6 +91,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   defensiveResearchStation: {
     // Initial guess: defensive upgrades building.
@@ -73,6 +99,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   thirdSpace: {
     // Initial guess: XP boost / cultural building.
@@ -80,6 +107,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 4,
     visionRange: 3,
     footprintTiles: 3,
+    populationSupport: 4,
   },
 };
 
@@ -92,6 +120,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 8,
     visionRange: 7,
     footprintTiles: 4,
+    populationSupport: 10, // Initial guess: capital supports 10 units.
   },
   cottage: {
     // Initial guess: basic housing.
@@ -99,6 +128,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 3,
     visionRange: 2,
     footprintTiles: 2,
+    populationSupport: 4, // Initial guess: small house adds 4 population.
   },
   wall: {
     // Initial guess: defensive structure — very high HP, no occupants.
@@ -106,6 +136,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 0,
     visionRange: 1,
     footprintTiles: 1,
+    populationSupport: 0,
   },
   wizardTower: {
     // Initial guess: defensive tower — high HP, best wizard vision range.
@@ -113,6 +144,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 1,
     visionRange: 10,
     footprintTiles: 1,
+    populationSupport: 0,
   },
   watermill: {
     // Initial guess: water resource building.
@@ -120,6 +152,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 1,
     visionRange: 3,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   logCabin: {
     // Initial guess: wood processing.
@@ -127,6 +160,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 1,
     visionRange: 2,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   manaReservoir: {
     // Initial guess: mana generation building.
@@ -134,6 +168,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 0,
     visionRange: 3,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   libraryOfEvocation: {
     // Initial guess: spell research — Evoker abilities.
@@ -141,6 +176,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 3,
+    populationSupport: 0,
   },
   libraryOfIllusion: {
     // Initial guess: spell research — Illusionist abilities.
@@ -148,6 +184,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 3,
+    populationSupport: 0,
   },
   libraryOfEnchantment: {
     // Initial guess: spell research — Enchantress abilities.
@@ -155,6 +192,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 3,
+    populationSupport: 0,
   },
   dragonHoard: {
     // Initial guess: Dragon production/housing.
@@ -162,6 +200,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 1,
     visionRange: 5,
     footprintTiles: 3,
+    populationSupport: 2,
   },
   temple: {
     // Initial guess: cultural/religious building — high occupants.
@@ -169,6 +208,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 6,
     visionRange: 4,
     footprintTiles: 3,
+    populationSupport: 6, // Initial guess: temple houses congregants.
   },
   embassy: {
     // Initial guess: diplomacy building.
@@ -176,6 +216,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 3,
     visionRange: 4,
     footprintTiles: 2,
+    populationSupport: 0,
   },
   amphitheatre: {
     // Initial guess: XP boost cultural building — large capacity.
@@ -183,5 +224,6 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 8,
     visionRange: 4,
     footprintTiles: 4,
+    populationSupport: 0,
   },
 };

@@ -59,6 +59,14 @@
   color: var(--color-robot-light);
 }
 
+.popValue {
+  color: #d1d5db;
+}
+
+.popAtCap .popValue {
+  color: #f87171;
+}
+
 .tick {
   flex-shrink: 0;
   font-size: 10px;

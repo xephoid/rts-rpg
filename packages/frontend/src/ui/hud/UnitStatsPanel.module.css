@@ -131,3 +131,71 @@
   border-radius: 2px;
   transition: width 0.1s;
 }
+
+.multiList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.groupRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+}
+
+.groupName {
+  font-size: 12px;
+  color: #e5e7eb;
+  text-transform: capitalize;
+}
+
+.groupCount {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.groupTotal {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-panel-border);
+  font-size: 10px;
+  color: #6b7280;
+  text-align: right;
+}
+
+.productionRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prodLabel {
+  font-size: 10px;
+  color: #9ca3af;
+  display: flex;
+  justify-content: space-between;
+}
+
+.prodTrack {
+  height: 6px;
+  background: #1f1a2e;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.prodFill {
+  height: 100%;
+  background: #f59e0b;
+  border-radius: 2px;
+  transition: width 0.1s;
+}
+
+.buildingIdle {
+  font-size: 10px;
+  color: #4b5563;
+  font-style: italic;
+}

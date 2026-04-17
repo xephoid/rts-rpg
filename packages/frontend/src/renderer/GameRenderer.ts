@@ -2,7 +2,7 @@
 // No UI elements drawn here. No React imports.
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
-import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot } from "@neither/shared";
+import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot } from "@neither/shared";
 import { robotBuildingStats, wizardBuildingStats } from "@neither/shared";
 import {
   terrainAssets,
@@ -23,8 +23,10 @@ export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 export type RendererConfig = {
   /** Called when the camera position changes (for UI sync). */
   onCameraChange?: (x: number, y: number, zoom: ZoomLevel) => void;
-  onEntitySelect?: (id: string | null, kind: "unit" | "building" | null) => void;
-  onMoveOrder?: (entityId: string, target: { x: number; y: number }) => void;
+  /** ids.length===0 → deselect; length===1 → single; length>1 → multi (always "unit") */
+  onEntitySelect?: (ids: string[], kind: "unit" | "building" | null) => void;
+  onMoveOrder?: (entityIds: string[], target: { x: number; y: number }) => void;
+  onGatherOrder?: (unitIds: string[], depositId: string) => void;
 };
 
 export class GameRenderer {
@@ -40,18 +42,35 @@ export class GameRenderer {
   private cameraX = 0;
   private cameraY = 0;
 
+  // Right-click pan state
   private isDragging = false;
   private dragStartX = 0;
   private dragStartY = 0;
   private dragStartCamX = 0;
   private dragStartCamY = 0;
 
+  // Deposit rendering
+  private depositContainer: Container | null = null;
+  private lastDeposits: DepositSnapshot[] = [];
+
+  // Entity rendering
   private entityContainer: Container | null = null;
   private entitySprites = new Map<string, Sprite>();
   private selectionGfx: Graphics | null = null;
   private lastEntities: EntitySnapshot[] = [];
-  private selectedEntityId: string | null = null;
+  private lastFog: FogSnapshot | null = null;
+  private selectedIds = new Set<string>();
+
+  // Left-click / rubber band state
   private leftDownPos: { x: number; y: number } | null = null;
+  private rubberBandContainer: Container | null = null;
+  private rubberBandGfx: Graphics | null = null;
+  private rubberBandStart: { x: number; y: number } | null = null;
+  private isDragSelecting = false;
+
+  // Double-click detection
+  private lastClickTime = 0;
+  private lastClickEntityId: string | null = null;
 
   private mapWidthTiles = 0;
   private mapHeightTiles = 0;
@@ -84,11 +103,20 @@ export class GameRenderer {
     this.tileContainer = new Container();
     this.worldContainer.addChild(this.tileContainer);
 
+    this.depositContainer = new Container();
+    this.worldContainer.addChild(this.depositContainer);
+
     this.entityContainer = new Container();
     this.worldContainer.addChild(this.entityContainer);
 
     this.fogContainer = new Container();
     this.worldContainer.addChild(this.fogContainer);
+
+    // Rubber band lives in screen-space on top of everything
+    this.rubberBandContainer = new Container();
+    this.rubberBandGfx = new Graphics();
+    this.rubberBandContainer.addChild(this.rubberBandGfx);
+    this.app.stage.addChild(this.rubberBandContainer);
 
     this._attachInputHandlers();
     await this._preloadTerrainTextures();
@@ -112,14 +140,17 @@ export class GameRenderer {
   render(state: GameStateSnapshot): void {
     if (!this.tileContainer || !this.texturesLoaded) return;
     this.lastEntities = state.entities;
+    this.lastFog = state.fog[this.activeFaction];
 
     const tileCount = state.tiles.length;
     if (this.tileContainer.children.length !== tileCount) {
       this._buildTileLayer(state.tiles);
     }
 
+    this.lastDeposits = state.deposits ?? [];
+    this._renderDeposits(this.lastDeposits);
     this._renderEntities(state.entities);
-    this._renderFog(state.fog[this.activeFaction]);
+    this._renderFog(this.lastFog);
     this._applyCamera();
   }
 
@@ -127,8 +158,8 @@ export class GameRenderer {
     this.activeFaction = faction;
   }
 
-  setSelectedEntity(id: string | null): void {
-    this.selectedEntityId = id;
+  setSelectedIds(ids: string[]): void {
+    this.selectedIds = new Set(ids);
   }
 
   private _getFootprint(entity: EntitySnapshot): number {
@@ -153,6 +184,30 @@ export class GameRenderer {
       sprite.tint = entity.faction === "wizards" ? 0xa855f7 : 0xeab308;
     }
     return sprite;
+  }
+
+  private _renderDeposits(deposits: DepositSnapshot[]): void {
+    if (!this.depositContainer) return;
+    this.depositContainer.removeChildren();
+
+    for (const deposit of deposits) {
+      if (this._fogValueAt(deposit.position.x, deposit.position.y) < 2) continue;
+
+      const cx = (deposit.position.x + 0.5) * TILE_SIZE;
+      const cy = (deposit.position.y + 0.5) * TILE_SIZE;
+
+      const g = new Graphics();
+      if (deposit.kind === "wood") {
+        g.circle(cx, cy, 14)
+          .fill({ color: 0x2d7a1b, alpha: 0.85 })
+          .stroke({ color: 0x8b5e3c, width: 2 });
+      } else {
+        g.circle(cx, cy, 14)
+          .fill({ color: 0x1a6ea6, alpha: 0.85 })
+          .stroke({ color: 0x7dd3fc, width: 2 });
+      }
+      this.depositContainer.addChild(g);
+    }
   }
 
   private _renderEntities(entities: EntitySnapshot[]): void {
@@ -182,6 +237,9 @@ export class GameRenderer {
       sprite.y = entity.position.y * TILE_SIZE;
       sprite.width = fp * TILE_SIZE;
       sprite.height = fp * TILE_SIZE;
+
+      const fogVal = this._fogValueAt(entity.position.x, entity.position.y);
+      sprite.visible = fogVal === 2 || (fogVal === 1 && entity.kind === "building");
     }
 
     // Remove sprites for entities no longer in snapshot
@@ -192,11 +250,12 @@ export class GameRenderer {
       }
     }
 
-    // Redraw selection ring
+    // Redraw selection rings for all selected entities
     this.selectionGfx.clear();
-    if (this.selectedEntityId) {
-      const sel = entities.find((e) => e.id === this.selectedEntityId);
-      if (sel) this._drawSelectionRing(sel);
+    for (const entity of entities) {
+      if (this.selectedIds.has(entity.id)) {
+        this._drawSelectionRing(entity);
+      }
     }
   }
 
@@ -354,14 +413,28 @@ export class GameRenderer {
 
   private readonly _onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    const oldZoom = ZOOM_LEVELS[this.zoomIndex]!;
     const delta = e.deltaY > 0 ? -1 : 1;
     this.zoomIndex = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, this.zoomIndex + delta));
+    const newZoom = ZOOM_LEVELS[this.zoomIndex]!;
+
+    if (oldZoom !== newZoom && this.app) {
+      // Keep the screen center fixed in world space when zooming
+      const screenW = this.app.screen.width;
+      const screenH = this.app.screen.height;
+      const worldX = (screenW / 2 + this.cameraX) / oldZoom;
+      const worldY = (screenH / 2 + this.cameraY) / oldZoom;
+      this.cameraX = worldX * newZoom - screenW / 2;
+      this.cameraY = worldY * newZoom - screenH / 2;
+    }
+
     this._applyCamera();
   };
 
   private readonly _onPointerDown = (e: PointerEvent): void => {
     if (e.button === 0) {
       this.leftDownPos = { x: e.clientX, y: e.clientY };
+      this.rubberBandStart = { x: e.clientX, y: e.clientY };
     } else if (e.button === 2) {
       this.isDragging = true;
       this.dragStartX = e.clientX;
@@ -373,20 +446,41 @@ export class GameRenderer {
   };
 
   private readonly _onPointerMove = (e: PointerEvent): void => {
-    if (!this.isDragging) return;
-    this.cameraX = this.dragStartCamX - (e.clientX - this.dragStartX);
-    this.cameraY = this.dragStartCamY - (e.clientY - this.dragStartY);
-    this._applyCamera();
+    // Right-click pan
+    if (this.isDragging) {
+      this.cameraX = this.dragStartCamX - (e.clientX - this.dragStartX);
+      this.cameraY = this.dragStartCamY - (e.clientY - this.dragStartY);
+      this._applyCamera();
+      return;
+    }
+    // Left-click rubber band
+    if (this.leftDownPos !== null) {
+      const dx = e.clientX - this.leftDownPos.x;
+      const dy = e.clientY - this.leftDownPos.y;
+      if (Math.sqrt(dx * dx + dy * dy) > 5) {
+        this.isDragSelecting = true;
+        this._drawRubberBand(this.rubberBandStart!.x, this.rubberBandStart!.y, e.clientX, e.clientY);
+      }
+    }
   };
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
     if (e.button === 0 && this.leftDownPos) {
-      const dx = e.clientX - this.leftDownPos.x;
-      const dy = e.clientY - this.leftDownPos.y;
-      if (Math.sqrt(dx * dx + dy * dy) < 5) {
-        this._handleLeftClick(e.clientX, e.clientY);
+      if (this.isDragSelecting) {
+        const units = this._entitiesInBox(this.rubberBandStart!, { x: e.clientX, y: e.clientY });
+        this.selectedIds = new Set(units.map((u) => u.id));
+        this.config.onEntitySelect?.(units.map((u) => u.id), "unit");
+        this._clearRubberBand();
+        this.isDragSelecting = false;
+      } else {
+        const dx = e.clientX - this.leftDownPos.x;
+        const dy = e.clientY - this.leftDownPos.y;
+        if (Math.sqrt(dx * dx + dy * dy) < 5) {
+          this._handleLeftClick(e.clientX, e.clientY);
+        }
       }
       this.leftDownPos = null;
+      this.rubberBandStart = null;
     } else if (e.button === 2) {
       if (this.isDragging) {
         const dx = e.clientX - this.dragStartX;
@@ -405,7 +499,12 @@ export class GameRenderer {
     if (this.isDragging) {
       this.isDragging = false;
     }
+    if (this.isDragSelecting) {
+      this._clearRubberBand();
+      this.isDragSelecting = false;
+    }
     this.leftDownPos = null;
+    this.rubberBandStart = null;
   };
 
   private _screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
@@ -439,20 +538,103 @@ export class GameRenderer {
     const hit = this.lastEntities.find((e) => this._hitTest(e, tileX, tileY)) ?? null;
 
     if (hit) {
-      this.selectedEntityId = hit.id;
-      this.config.onEntitySelect?.(hit.id, hit.kind);
+      const now = Date.now();
+      const isDouble = now - this.lastClickTime < 300 && hit.id === this.lastClickEntityId;
+      if (isDouble && hit.kind === "unit" && hit.faction === this.activeFaction) {
+        const sameType = this.lastEntities.filter(
+          (e) => e.kind === "unit" && e.faction === this.activeFaction && e.typeKey === hit.typeKey && this._isInViewport(e)
+        );
+        this.selectedIds = new Set(sameType.map((e) => e.id));
+        this.config.onEntitySelect?.(sameType.map((e) => e.id), "unit");
+      } else {
+        this.selectedIds = new Set([hit.id]);
+        this.config.onEntitySelect?.([hit.id], hit.kind);
+      }
+      this.lastClickTime = now;
+      this.lastClickEntityId = hit.id;
     } else {
-      this.selectedEntityId = null;
-      this.config.onEntitySelect?.(null, null);
+      this.selectedIds.clear();
+      this.config.onEntitySelect?.([], null);
+      this.lastClickEntityId = null;
     }
   }
 
   private _handleRightClick(screenX: number, screenY: number): void {
-    if (!this.selectedEntityId) return;
+    if (this.selectedIds.size === 0) return;
+    // Only issue orders to friendly units
+    const friendlyIds = [...this.selectedIds].filter((id) => {
+      const e = this.lastEntities.find((ent) => ent.id === id);
+      return e?.kind === "unit" && e.faction === this.activeFaction;
+    });
+    if (friendlyIds.length === 0) return;
     const world = this._screenToWorld(screenX, screenY);
     const tileX = world.x / TILE_SIZE;
     const tileY = world.y / TILE_SIZE;
-    this.config.onMoveOrder?.(this.selectedEntityId, { x: tileX, y: tileY });
+
+    // Check deposits first — right-click on visible deposit → gather order
+    const hitDeposit = this.lastDeposits.find((d) => {
+      if (this._fogValueAt(d.position.x, d.position.y) < 2) return false;
+      const dx = tileX - (d.position.x + 0.5);
+      const dy = tileY - (d.position.y + 0.5);
+      return dx * dx + dy * dy < 0.6 * 0.6;
+    });
+    if (hitDeposit) {
+      this.config.onGatherOrder?.(friendlyIds, hitDeposit.id);
+      return;
+    }
+
+    this.config.onMoveOrder?.(friendlyIds, { x: tileX, y: tileY });
+  }
+
+  private _drawRubberBand(x1: number, y1: number, x2: number, y2: number): void {
+    if (!this.rubberBandGfx) return;
+    const minX = Math.min(x1, x2);
+    const minY = Math.min(y1, y2);
+    const w = Math.abs(x2 - x1);
+    const h = Math.abs(y2 - y1);
+    this.rubberBandGfx.clear();
+    this.rubberBandGfx
+      .rect(minX, minY, w, h)
+      .fill({ color: 0xffffff, alpha: 0.07 })
+      .stroke({ color: 0xffffff, width: 1, alpha: 0.65 });
+  }
+
+  private _clearRubberBand(): void {
+    this.rubberBandGfx?.clear();
+  }
+
+  private _fogValueAt(tileX: number, tileY: number): number {
+    if (!this.lastFog) return 2; // no data yet — treat as visible
+    const x = Math.floor(tileX);
+    const y = Math.floor(tileY);
+    const { width, height, data } = this.lastFog;
+    if (x < 0 || x >= width || y < 0 || y >= height) return 0;
+    return data[y * width + x] as number;
+  }
+
+  private _entitiesInBox(
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ): EntitySnapshot[] {
+    const zoom = ZOOM_LEVELS[this.zoomIndex]!;
+    const minX = Math.min(start.x, end.x);
+    const maxX = Math.max(start.x, end.x);
+    const minY = Math.min(start.y, end.y);
+    const maxY = Math.max(start.y, end.y);
+    return this.lastEntities.filter((e) => {
+      if (e.kind !== "unit" || e.faction !== this.activeFaction) return false;
+      const sx = (e.position.x + 0.5) * TILE_SIZE * zoom - this.cameraX;
+      const sy = (e.position.y + 0.5) * TILE_SIZE * zoom - this.cameraY;
+      return sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;
+    });
+  }
+
+  private _isInViewport(e: EntitySnapshot): boolean {
+    if (!this.app) return false;
+    const zoom = ZOOM_LEVELS[this.zoomIndex]!;
+    const sx = (e.position.x + 0.5) * TILE_SIZE * zoom - this.cameraX;
+    const sy = (e.position.y + 0.5) * TILE_SIZE * zoom - this.cameraY;
+    return sx >= 0 && sx <= this.app.screen.width && sy >= 0 && sy <= this.app.screen.height;
   }
 
   // ── Public controls ─────────────────────────────────────────────────────────
@@ -495,6 +677,8 @@ export class GameRenderer {
     for (const sprite of this.entitySprites.values()) sprite.destroy();
     this.entitySprites.clear();
     this.selectionGfx = null;
+    this.rubberBandGfx = null;
+    this.rubberBandContainer = null;
     this.app?.destroy(true);
     this.app = null;
   }

@@ -18,12 +18,42 @@ function formatTypeKey(key: string): string {
 
 export function UnitStatsPanel() {
   const gameState = useGameStore((s) => s.gameState);
-  const selectedEntity = useUIStore((s) => s.selectedEntity);
+  const selection = useUIStore((s) => s.selection);
 
-  const entity =
-    selectedEntity && gameState
-      ? gameState.entities.find((e) => e.id === selectedEntity.id) ?? null
-      : null;
+  if (selection.mode === "none" || !gameState) {
+    return (
+      <div className={styles.panel}>
+        <div className={styles.header}>Selection</div>
+        <div className={styles.empty}>No selection</div>
+      </div>
+    );
+  }
+
+  if (selection.mode === "multi") {
+    const selected = gameState.entities.filter((e) => selection.ids.includes(e.id));
+    const groups = new Map<string, number>();
+    for (const e of selected) groups.set(e.typeKey, (groups.get(e.typeKey) ?? 0) + 1);
+
+    return (
+      <div className={styles.panel}>
+        <div className={styles.header}>Selection</div>
+        <div className={styles.content}>
+          <div className={styles.multiList}>
+            {[...groups].map(([typeKey, count]) => (
+              <div key={typeKey} className={styles.groupRow}>
+                <span className={styles.groupName}>{formatTypeKey(typeKey)}</span>
+                <span className={styles.groupCount}>× {count}</span>
+              </div>
+            ))}
+            <div className={styles.groupTotal}>{selected.length} units</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // mode: "single"
+  const entity = gameState.entities.find((e) => e.id === selection.id) ?? null;
 
   if (!entity) {
     return (
@@ -43,9 +73,11 @@ export function UnitStatsPanel() {
     <div className={styles.panel}>
       <div className={styles.header}>Selection</div>
       <div className={styles.content}>
-        <div className={styles.entityName}>{formatTypeKey(entity.typeKey)}</div>
+        <div className={styles.entityName}>
+          {entity.isNamed && entity.name ? entity.name : formatTypeKey(entity.typeKey)}
+        </div>
         <div className={styles.entityMeta}>
-          {entity.faction} · {entity.kind} · Lv {stats.level}
+          {entity.isNamed ? formatTypeKey(entity.typeKey) + " · " : ""}{entity.faction} · {entity.kind} · Lv {stats.level}
         </div>
 
         <div className={styles.hpBarWrapper}>
@@ -82,17 +114,38 @@ export function UnitStatsPanel() {
           </div>
         </div>
 
-        <div className={styles.xpRow}>
-          <div className={styles.xpLabel}>
-            <span>XP</span>
-            <span>
-              {stats.xp} / {xpNeeded}
-            </span>
+        {entity.kind === "unit" && (
+          <div className={styles.xpRow}>
+            <div className={styles.xpLabel}>
+              <span>XP</span>
+              <span>
+                {stats.xp} / {xpNeeded}
+              </span>
+            </div>
+            <div className={styles.xpTrack}>
+              <div className={styles.xpFill} style={{ width: `${xpRatio * 100}%` }} />
+            </div>
           </div>
-          <div className={styles.xpTrack}>
-            <div className={styles.xpFill} style={{ width: `${xpRatio * 100}%` }} />
-          </div>
-        </div>
+        )}
+
+        {entity.kind === "building" && (
+          entity.productionProgress ? (
+            <div className={styles.productionRow}>
+              <div className={styles.prodLabel}>
+                <span>Producing: {formatTypeKey(entity.productionProgress.unitTypeKey)}</span>
+                <span>{entity.productionProgress.progressTicks}/{entity.productionProgress.totalTicks}</span>
+              </div>
+              <div className={styles.prodTrack}>
+                <div
+                  className={styles.prodFill}
+                  style={{ width: `${(entity.productionProgress.progressTicks / entity.productionProgress.totalTicks) * 100}%` }}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className={styles.buildingIdle}>Idle</div>
+          )
+        )}
       </div>
     </div>
   );

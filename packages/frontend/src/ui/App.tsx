@@ -18,7 +18,11 @@ export function App() {
   const activeFaction = useUIStore((s) => s.activeFaction);
   const cameraTarget = useUIStore((s) => s.cameraTarget);
   const setCameraTarget = useUIStore((s) => s.setCameraTarget);
-  const selectedEntity = useUIStore((s) => s.selectedEntity);
+  const selection = useUIStore((s) => s.selection);
+  const pendingStop = useUIStore((s) => s.pendingStop);
+  const clearPendingStop = useUIStore((s) => s.clearPendingStop);
+  const pendingProduction = useUIStore((s) => s.pendingProduction);
+  const clearPendingProduction = useUIStore((s) => s.clearPendingProduction);
 
   // Init renderer + engine
   useEffect(() => {
@@ -29,16 +33,33 @@ export function App() {
     const renderer = new GameRenderer({
       onCameraChange: (x, y, zoom) =>
         useUIStore.getState().setCameraPosition(x, y, zoom),
-      onEntitySelect: (id, kind) => {
-        const uiStore = useUIStore.getState();
-        if (id && kind) {
-          uiStore.setSelectedEntity({ kind, id });
+      onEntitySelect: (ids, kind) => {
+        const store = useUIStore.getState();
+        if (ids.length === 0) {
+          store.setSelection({ mode: "none" });
+        } else if (ids.length === 1) {
+          store.setSelection({ mode: "single", id: ids[0]!, kind: kind! });
         } else {
-          uiStore.setSelectedEntity(null);
+          store.setSelection({ mode: "multi", ids });
         }
       },
-      onMoveOrder: (entityId, target) => {
-        engineRef.current?.issueMoveOrder(entityId, target);
+      onGatherOrder: (unitIds, depositId) => {
+        for (const id of unitIds) engineRef.current?.issueGatherOrder(id, depositId);
+      },
+      onMoveOrder: (entityIds, target) => {
+        const { pendingPatrolIds, setPendingPatrolIds } = useUIStore.getState();
+        if (pendingPatrolIds && pendingPatrolIds.length > 0) {
+          // Issue patrol from each unit's current position to the right-clicked target
+          for (const id of pendingPatrolIds) {
+            const unit = engineRef.current?.entities.get(id);
+            if (unit && unit.kind === "unit") {
+              engineRef.current?.issuePatrolOrder(id, { ...unit.position }, target);
+            }
+          }
+          setPendingPatrolIds(null);
+        } else {
+          for (const id of entityIds) engineRef.current?.issueMoveOrder(id, target);
+        }
       },
     });
     rendererRef.current = renderer;
@@ -82,10 +103,30 @@ export function App() {
     setCameraTarget(null);
   }, [cameraTarget, setCameraTarget]);
 
-  // Sync selected entity from store to renderer (handles programmatic deselection)
+  // Sync selection from store to renderer (handles programmatic deselection)
   useEffect(() => {
-    rendererRef.current?.setSelectedEntity(selectedEntity?.id ?? null);
-  }, [selectedEntity]);
+    const ids =
+      selection.mode === "none"
+        ? []
+        : selection.mode === "single"
+          ? [selection.id]
+          : selection.ids;
+    rendererRef.current?.setSelectedIds(ids);
+  }, [selection]);
+
+  // Consume pending stop orders
+  useEffect(() => {
+    if (!pendingStop) return;
+    for (const id of pendingStop) engineRef.current?.issueStopOrder(id);
+    clearPendingStop();
+  }, [pendingStop, clearPendingStop]);
+
+  // Consume pending production orders
+  useEffect(() => {
+    if (!pendingProduction) return;
+    engineRef.current?.issueProductionOrder(pendingProduction.buildingId, pendingProduction.unitTypeKey);
+    clearPendingProduction();
+  }, [pendingProduction, clearPendingProduction]);
 
   // WASD panning
   useEffect(() => {

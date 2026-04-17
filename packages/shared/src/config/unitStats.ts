@@ -233,6 +233,60 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
   },
 };
 
+// ── Unit roles + level-up bonuses ─────────────────────────────────────────────
+
+export type UnitRole = "combat" | "worker" | "support" | "spy" | "hero" | "tank" | "core";
+
+export type LevelUpBonus = {
+  hpPct: number;
+  damagePct: number;
+  armorPct: number;
+  speedPct: number;
+  charismaPct: number;
+  rangePct: number;
+  capacityPct: number;
+};
+
+// Initial guess: +5% to role-relevant stats per level. Adjust after playtesting.
+export const levelUpBonuses: Record<UnitRole, LevelUpBonus> = {
+  combat:  { hpPct: 0, damagePct: 5, armorPct: 5,  speedPct: 0, charismaPct: 0, rangePct: 0, capacityPct: 0 },
+  worker:  { hpPct: 0, damagePct: 0, armorPct: 0,  speedPct: 5, charismaPct: 0, rangePct: 0, capacityPct: 5 },
+  support: { hpPct: 0, damagePct: 0, armorPct: 0,  speedPct: 0, charismaPct: 5, rangePct: 5, capacityPct: 0 },
+  spy:     { hpPct: 0, damagePct: 5, armorPct: 0,  speedPct: 5, charismaPct: 0, rangePct: 0, capacityPct: 0 },
+  hero:    { hpPct: 5, damagePct: 5, armorPct: 0,  speedPct: 0, charismaPct: 5, rangePct: 0, capacityPct: 0 },
+  tank:    { hpPct: 5, damagePct: 0, armorPct: 10, speedPct: 0, charismaPct: 0, rangePct: 0, capacityPct: 0 },
+  core:    { hpPct: 5, damagePct: 0, armorPct: 0,  speedPct: 0, charismaPct: 5, rangePct: 0, capacityPct: 0 },
+};
+
+export const unitRoles: Record<string, UnitRole> = {
+  // Robot units
+  core:                    "core",
+  waterCollectionPlatform: "worker",
+  woodChopperPlatform:     "worker",
+  movableBuildKitPlatform: "worker",
+  spinnerPlatform:         "combat",
+  spitterPlatform:         "combat",
+  infiltrationPlatform:    "spy",
+  largeCombatPlatform:     "tank",
+  probePlatform:           "support",
+  wallPlatform:            "tank",
+  // Wizard units
+  archmage:   "hero",
+  surf:       "spy",
+  subject:    "worker",
+  evoker:     "combat",
+  illusionist: "support",
+  dragon:     "tank",
+  enchantress: "support",
+  cleric:     "worker",
+};
+
+/** Named leaders spawned at game start — one per faction. */
+export const namedLeaders = {
+  wizards: { typeKey: "archmage" as const, name: "Archmage Elara" },
+  robots:  { typeKey: "core"     as const, name: "Motherboard" },
+} as const;
+
 // ── XP rates ─────────────────────────────────────────────────────────────────
 
 export const xpRates = {

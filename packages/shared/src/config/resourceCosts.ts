@@ -1,6 +1,15 @@
 // Resource costs and production/construction durations.
 // Values marked "Initial guess" — update to "Confirmed" after playtesting sign-off.
 
+/** Game loop target — used to convert seconds → ticks for production durations. */
+export const TICKS_PER_SEC = 60;
+
+export const gatherRates = {
+  // Initial guess: fills a 20-capacity unit in ~10 ticks at the deposit.
+  woodPerTick: 2,
+  waterPerTick: 2,
+};
+
 export type UnitCost = {
   wood: number;
   water: number;
@@ -111,6 +120,14 @@ export const woodDeposit = {
   quantityMin: 400,
   quantityMax: 800,
   regenerates: false, // Initial guess: finite — adjust if turtling is a problem
+};
+
+export const waterDeposit = {
+  // Initial guess: large but finite — water is harder to exhaust than wood,
+  // but long games eventually require finding new sources.
+  quantityMin: 2000,
+  quantityMax: 5000,
+  regenerates: false,
 };
 
 // ── Auto-collection rates (per tick) ─────────────────────────────────────────

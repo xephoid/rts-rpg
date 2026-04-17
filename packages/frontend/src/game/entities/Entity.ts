@@ -19,6 +19,8 @@ export abstract class Entity {
   readonly typeKey: string;
   position: Vec2;
   readonly stats: StatBlock;
+  readonly isNamed: boolean;
+  readonly name: string | null;
 
   constructor(params: {
     id?: string | undefined;
@@ -27,6 +29,8 @@ export abstract class Entity {
     typeKey: string;
     position: Vec2;
     stats: StatBlockInit;
+    isNamed?: boolean;
+    name?: string | null;
   }) {
     this.id = params.id ?? generateEntityId(params.typeKey);
     this.kind = params.kind;
@@ -34,6 +38,8 @@ export abstract class Entity {
     this.typeKey = params.typeKey;
     this.position = { ...params.position };
     this.stats = new StatBlock(params.stats);
+    this.isNamed = params.isNamed ?? false;
+    this.name = params.name ?? null;
   }
 
   get isDead(): boolean {
@@ -48,6 +54,8 @@ export abstract class Entity {
       typeKey: this.typeKey,
       position: { ...this.position },
       stats: this.stats.toSnapshot(),
+      isNamed: this.isNamed,
+      name: this.name,
     };
   }
 }

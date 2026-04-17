@@ -31,6 +31,21 @@ export class BuildingEntity extends Entity {
     return this.state.kind === "operational";
   }
 
+  override toSnapshot() {
+    const base = super.toSnapshot();
+    return {
+      ...base,
+      productionProgress:
+        this.state.kind === "producing"
+          ? {
+              unitTypeKey: this.state.unitTypeKey,
+              progressTicks: this.state.progressTicks,
+              totalTicks: this.state.totalTicks,
+            }
+          : null,
+    };
+  }
+
   advanceConstruction(): boolean {
     if (this.state.kind !== "underConstruction") return false;
     this.state.progressTicks++;

@@ -10,6 +10,8 @@ function makeSnapshot(id: string): EntitySnapshot {
     typeKey: "evoker",
     position: { x: 0, y: 0 },
     stats: { hp: 100, maxHp: 100, damage: 20, range: 5, speed: 2, charisma: 3, armor: 5, capacity: 10, xp: 0, level: 1 },
+    isNamed: false,
+    name: null,
   };
 }
 

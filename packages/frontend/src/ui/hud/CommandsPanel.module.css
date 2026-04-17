@@ -60,3 +60,16 @@
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+.cmdBtnActive {
+  background: rgba(99, 179, 237, 0.18);
+  border-color: rgba(99, 179, 237, 0.5);
+  color: #90cdf4;
+}
+
+.cmdBtn .cost {
+  display: block;
+  font-size: 9px;
+  color: #6b7280;
+  margin-top: 2px;
+}
