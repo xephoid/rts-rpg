@@ -1,7 +1,7 @@
 // Game simulation engine — pure TypeScript, no imports from /renderer, /ui, /store.
 // Pushes GameStateSnapshot to the store bridge after each tick via onTick callback.
 
-import type { Faction, GameStateSnapshot } from "@neither/shared";
+import type { Faction, GameStateSnapshot, Vec2 } from "@neither/shared";
 import {
   startingResources,
   mapSizes,
@@ -10,7 +10,7 @@ import {
   robotUnitStats,
   wizardUnitStats,
 } from "@neither/shared";
-import { GameLoop } from "./loop/GameLoop.js";
+import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
 import { EventBus } from "./events/EventBus.js";
 import { Grid } from "./spatial/Grid.js";
@@ -20,6 +20,7 @@ import { FogOfWar } from "./fog/FogOfWar.js";
 import { LastSeenMap } from "./fog/LastSeenMap.js";
 import { UnitEntity } from "./entities/UnitEntity.js";
 import { BuildingEntity } from "./entities/BuildingEntity.js";
+import { findPath } from "./spatial/Pathfinder.js";
 
 export type GameEngineConfig = {
   mapSize?: MapSize;
@@ -177,10 +178,57 @@ export class GameEngine {
     this.loop.resume();
   }
 
+  issueMoveOrder(entityId: string, target: Vec2): void {
+    const entity = this.entities.get(entityId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+    const goal = { x: Math.floor(target.x), y: Math.floor(target.y) };
+    const path = findPath(this.grid, start, goal);
+    if (path === null) return;
+    unit.state = { kind: "moving", targetPosition: target, path };
+  }
+
+  private _processMovement(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind === "moving") {
+        this._advanceUnit(unit, TICK_MS / 1000);
+      }
+    }
+  }
+
+  private _advanceUnit(unit: UnitEntity, stepSecs: number): void {
+    if (unit.state.kind !== "moving") return;
+    const state = unit.state;
+    let remaining = unit.stats.speed * stepSecs;
+
+    while (remaining > 0 && state.path.length > 0) {
+      const next = state.path[0]!;
+      const dx = next.x - unit.position.x;
+      const dy = next.y - unit.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist <= remaining) {
+        unit.position = { x: next.x, y: next.y };
+        state.path.shift();
+        remaining -= dist;
+      } else {
+        unit.position = {
+          x: unit.position.x + (dx / dist) * remaining,
+          y: unit.position.y + (dy / dist) * remaining,
+        };
+        remaining = 0;
+      }
+    }
+
+    if (state.path.length === 0) {
+      unit.state = { kind: "idle" };
+    }
+  }
+
   private tick(tick: number, elapsedMs: number): void {
     // Tick processing order: input → AI → movement → combat → resources → fog → narrative → render
-    // TODO: Phase 5+ — implement movement, combat, resources
-
+    this._processMovement();
     this._updateFog(tick);
     this.events.flushDeferred();
 

@@ -13,10 +13,12 @@ const PAN_STEP = 192; // pixels per WASD keydown
 export function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<GameRenderer | null>(null);
+  const engineRef = useRef<GameEngine | null>(null);
   const pushGameState = useGameStore((s) => s.pushGameState);
   const activeFaction = useUIStore((s) => s.activeFaction);
   const cameraTarget = useUIStore((s) => s.cameraTarget);
   const setCameraTarget = useUIStore((s) => s.setCameraTarget);
+  const selectedEntity = useUIStore((s) => s.selectedEntity);
 
   // Init renderer + engine
   useEffect(() => {
@@ -27,6 +29,17 @@ export function App() {
     const renderer = new GameRenderer({
       onCameraChange: (x, y, zoom) =>
         useUIStore.getState().setCameraPosition(x, y, zoom),
+      onEntitySelect: (id, kind) => {
+        const uiStore = useUIStore.getState();
+        if (id && kind) {
+          uiStore.setSelectedEntity({ kind, id });
+        } else {
+          uiStore.setSelectedEntity(null);
+        }
+      },
+      onMoveOrder: (entityId, target) => {
+        engineRef.current?.issueMoveOrder(entityId, target);
+      },
     });
     rendererRef.current = renderer;
 
@@ -38,6 +51,7 @@ export function App() {
         renderer.render(state);
       },
     });
+    engineRef.current = engine;
 
     renderer.init(container).then(() => {
       if (cancelled) {
@@ -50,6 +64,7 @@ export function App() {
     return () => {
       cancelled = true;
       rendererRef.current = null;
+      engineRef.current = null;
       engine.stop();
       renderer.destroy();
     };
@@ -66,6 +81,11 @@ export function App() {
     rendererRef.current?.setCameraPosition(cameraTarget.x, cameraTarget.y);
     setCameraTarget(null);
   }, [cameraTarget, setCameraTarget]);
+
+  // Sync selected entity from store to renderer (handles programmatic deselection)
+  useEffect(() => {
+    rendererRef.current?.setSelectedEntity(selectedEntity?.id ?? null);
+  }, [selectedEntity]);
 
   // WASD panning
   useEffect(() => {

@@ -2,7 +2,7 @@
 // No UI elements drawn here. No React imports.
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
-import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot } from "@neither/shared";
+import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot } from "@neither/shared";
 import { terrainAssets } from "./assets.js";
 
 export const TILE_SIZE = 64; // pixels at zoom level 1.0
@@ -14,6 +14,8 @@ export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 export type RendererConfig = {
   /** Called when the camera position changes (for UI sync). */
   onCameraChange?: (x: number, y: number, zoom: ZoomLevel) => void;
+  onEntitySelect?: (id: string | null, kind: "unit" | "building" | null) => void;
+  onMoveOrder?: (entityId: string, target: { x: number; y: number }) => void;
 };
 
 export class GameRenderer {
@@ -34,6 +36,12 @@ export class GameRenderer {
   private dragStartY = 0;
   private dragStartCamX = 0;
   private dragStartCamY = 0;
+
+  private entityContainer: Container | null = null;
+  private entityGfx: Graphics | null = null;
+  private lastEntities: EntitySnapshot[] = [];
+  private selectedEntityId: string | null = null;
+  private leftDownPos: { x: number; y: number } | null = null;
 
   private mapWidthTiles = 0;
   private mapHeightTiles = 0;
@@ -66,6 +74,9 @@ export class GameRenderer {
     this.tileContainer = new Container();
     this.worldContainer.addChild(this.tileContainer);
 
+    this.entityContainer = new Container();
+    this.worldContainer.addChild(this.entityContainer);
+
     this.fogContainer = new Container();
     this.worldContainer.addChild(this.fogContainer);
 
@@ -84,18 +95,52 @@ export class GameRenderer {
 
   render(state: GameStateSnapshot): void {
     if (!this.tileContainer || !this.texturesLoaded) return;
+    this.lastEntities = state.entities;
 
     const tileCount = state.tiles.length;
     if (this.tileContainer.children.length !== tileCount) {
       this._buildTileLayer(state.tiles);
     }
 
+    this._renderEntities(state.entities);
     this._renderFog(state.fog[this.activeFaction]);
     this._applyCamera();
   }
 
   setActiveFaction(faction: Faction): void {
     this.activeFaction = faction;
+  }
+
+  setSelectedEntity(id: string | null): void {
+    this.selectedEntityId = id;
+  }
+
+  private _renderEntities(entities: EntitySnapshot[]): void {
+    if (!this.entityContainer || !this.app) return;
+
+    if (!this.entityGfx) {
+      this.entityGfx = new Graphics();
+      this.entityContainer.addChild(this.entityGfx);
+    }
+
+    this.entityGfx.clear();
+
+    for (const entity of entities) {
+      const cx = (entity.position.x + 0.5) * TILE_SIZE;
+      const cy = (entity.position.y + 0.5) * TILE_SIZE;
+      const color = entity.faction === "wizards" ? 0xa855f7 : 0xeab308;
+
+      if (entity.kind === "building") {
+        const hw = TILE_SIZE * 0.35;
+        this.entityGfx.rect(cx - hw, cy - hw, hw * 2, hw * 2).fill({ color, alpha: 0.9 });
+      } else {
+        this.entityGfx.circle(cx, cy, TILE_SIZE * 0.28).fill({ color, alpha: 0.9 });
+      }
+
+      if (entity.id === this.selectedEntityId) {
+        this.entityGfx.circle(cx, cy, TILE_SIZE * 0.44).stroke({ color: 0xffffff, width: 2, alpha: 0.9 });
+      }
+    }
   }
 
   private _renderFog(fog: FogSnapshot): void {
@@ -224,7 +269,7 @@ export class GameRenderer {
     canvas.addEventListener("pointerdown", this._onPointerDown);
     canvas.addEventListener("pointermove", this._onPointerMove);
     canvas.addEventListener("pointerup", this._onPointerUp);
-    canvas.addEventListener("pointerleave", this._onPointerUp);
+    canvas.addEventListener("pointerleave", this._onPointerLeave);
   }
 
   private readonly _onContextMenu = (e: MouseEvent): void => {
@@ -239,13 +284,16 @@ export class GameRenderer {
   };
 
   private readonly _onPointerDown = (e: PointerEvent): void => {
-    if (e.button !== 2) return; // right-drag to pan
-    this.isDragging = true;
-    this.dragStartX = e.clientX;
-    this.dragStartY = e.clientY;
-    this.dragStartCamX = this.cameraX;
-    this.dragStartCamY = this.cameraY;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    if (e.button === 0) {
+      this.leftDownPos = { x: e.clientX, y: e.clientY };
+    } else if (e.button === 2) {
+      this.isDragging = true;
+      this.dragStartX = e.clientX;
+      this.dragStartY = e.clientY;
+      this.dragStartCamX = this.cameraX;
+      this.dragStartCamY = this.cameraY;
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    }
   };
 
   private readonly _onPointerMove = (e: PointerEvent): void => {
@@ -256,11 +304,76 @@ export class GameRenderer {
   };
 
   private readonly _onPointerUp = (e: PointerEvent): void => {
-    if (this.isDragging) {
-      this.isDragging = false;
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    if (e.button === 0 && this.leftDownPos) {
+      const dx = e.clientX - this.leftDownPos.x;
+      const dy = e.clientY - this.leftDownPos.y;
+      if (Math.sqrt(dx * dx + dy * dy) < 5) {
+        this._handleLeftClick(e.clientX, e.clientY);
+      }
+      this.leftDownPos = null;
+    } else if (e.button === 2) {
+      if (this.isDragging) {
+        const dx = e.clientX - this.dragStartX;
+        const dy = e.clientY - this.dragStartY;
+        if (Math.sqrt(dx * dx + dy * dy) < 5) {
+          // right-click (not drag) — move order
+          this._handleRightClick(e.clientX, e.clientY);
+        }
+        this.isDragging = false;
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      }
     }
   };
+
+  private readonly _onPointerLeave = (_e: PointerEvent): void => {
+    if (this.isDragging) {
+      this.isDragging = false;
+    }
+    this.leftDownPos = null;
+  };
+
+  private _screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
+    const zoom = ZOOM_LEVELS[this.zoomIndex]!;
+    return {
+      x: (screenX + this.cameraX) / zoom,
+      y: (screenY + this.cameraY) / zoom,
+    };
+  }
+
+  private _handleLeftClick(screenX: number, screenY: number): void {
+    const world = this._screenToWorld(screenX, screenY);
+    const tileX = world.x / TILE_SIZE;
+    const tileY = world.y / TILE_SIZE;
+
+    let closest: EntitySnapshot | null = null;
+    let closestDist = 0.6; // hit radius in tiles
+
+    for (const entity of this.lastEntities) {
+      const cx = entity.position.x + 0.5;
+      const cy = entity.position.y + 0.5;
+      const dist = Math.sqrt((cx - tileX) ** 2 + (cy - tileY) ** 2);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = entity;
+      }
+    }
+
+    if (closest) {
+      this.selectedEntityId = closest.id;
+      this.config.onEntitySelect?.(closest.id, closest.kind);
+    } else {
+      this.selectedEntityId = null;
+      this.config.onEntitySelect?.(null, null);
+    }
+  }
+
+  private _handleRightClick(screenX: number, screenY: number): void {
+    if (!this.selectedEntityId) return;
+    const world = this._screenToWorld(screenX, screenY);
+    const tileX = world.x / TILE_SIZE;
+    const tileY = world.y / TILE_SIZE;
+    this.config.onMoveOrder?.(this.selectedEntityId, { x: tileX, y: tileY });
+  }
 
   // ── Public controls ─────────────────────────────────────────────────────────
 
@@ -295,11 +408,12 @@ export class GameRenderer {
       canvas.removeEventListener("pointerdown", this._onPointerDown);
       canvas.removeEventListener("pointermove", this._onPointerMove);
       canvas.removeEventListener("pointerup", this._onPointerUp);
-      canvas.removeEventListener("pointerleave", this._onPointerUp);
+      canvas.removeEventListener("pointerleave", this._onPointerLeave);
     }
     this.fogTexture?.destroy(true);
     this.fogTexture = null;
     this.app?.destroy(true);
     this.app = null;
+    this.entityGfx = null;
   }
 }
