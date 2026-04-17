@@ -1,5 +1,6 @@
 // UI Store — selected unit/building, open panels, camera, alerts, dialog state.
 import { create } from "zustand";
+import type { Faction } from "@neither/shared";
 
 export type SelectedEntity =
   | { kind: "unit"; id: string }
@@ -7,6 +8,9 @@ export type SelectedEntity =
   | null;
 
 export type UIStore = {
+  activeFaction: Faction;
+  setActiveFaction: (faction: Faction) => void;
+
   selectedEntity: SelectedEntity;
   setSelectedEntity: (entity: SelectedEntity) => void;
 
@@ -23,6 +27,9 @@ export type UIStore = {
 };
 
 export const useUIStore = create<UIStore>((set) => ({
+  activeFaction: "wizards",
+  setActiveFaction: (faction) => set({ activeFaction: faction }),
+
   selectedEntity: null,
   setSelectedEntity: (entity) => set({ selectedEntity: entity }),
 

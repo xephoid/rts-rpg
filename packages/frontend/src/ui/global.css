@@ -9,12 +9,32 @@
 }
 
 :root {
-  /* Wizard theme (default) */
   --color-bg: #0e0a0f;
   --color-panel-bg: rgba(16, 10, 22, 0.95);
+  --color-panel-border: rgba(100, 60, 140, 0.35);
   --font-header: "Cinzel", serif;
   --font-body: "Exo 2", sans-serif;
   --font-size-min: 12px;
+
+  /* Wizard faction */
+  --color-wizard-primary: #7c3aed;
+  --color-wizard-mid: #a855f7;
+  --color-wizard-light: #c084fc;
+
+  /* Robot faction */
+  --color-robot-primary: #ca8a04;
+  --color-robot-mid: #eab308;
+  --color-robot-light: #fde047;
+
+  /* Terrain minimap colors */
+  --color-terrain-open: #4a7a3a;
+  --color-terrain-forest: #2d5a1b;
+  --color-terrain-water: #1a3a6e;
+
+  /* HP bar */
+  --color-hp-high: #22c55e;
+  --color-hp-mid: #eab308;
+  --color-hp-low: #ef4444;
 }
 
 html,
