@@ -8,8 +8,8 @@ This file is the source of truth for all confirmed architectural decisions and w
 
 **Neither ___ Nor Gears** is a browser-based real-time strategy game with RPG progression and grand strategy diplomacy elements. Two playable factions (Wizards and Robots), five NPC factions, three win conditions (Military, Cultural, Technological), a full diplomacy system, and a local LLM narrative layer.
 
-Full spec: `functional_spec.docx`  
-Full development plan: `dev_plan.docx`
+Full spec: `functional_spec.md` (source: `functional_spec.docx`)  
+Full development plan: `dev_plan.md` (source: `dev_plan.docx`)
 
 ---
 
@@ -211,4 +211,3 @@ No implementation phase begins until Phase 0 is explicitly signed off by Zeke.
 ---
 
 *Last updated: April 2026*
-
