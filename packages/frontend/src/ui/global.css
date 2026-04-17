@@ -1,0 +1,30 @@
+/* Global reset and base styles */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Wizard theme (default) */
+  --color-bg: #0e0a0f;
+  --color-panel-bg: rgba(16, 10, 22, 0.95);
+  --font-header: "Cinzel", serif;
+  --font-body: "Exo 2", sans-serif;
+  --font-size-min: 12px;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  font-family: var(--font-body);
+  font-size: var(--font-size-min);
+  color: #e5e7eb;
+}
