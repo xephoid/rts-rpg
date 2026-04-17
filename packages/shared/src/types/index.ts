@@ -36,10 +36,21 @@ export type TileSnapshot = {
   woodRemaining?: number | undefined;
 };
 
+export type FogVisibility = 0 | 1 | 2; // UNEXPLORED | EXPLORED | VISIBLE
+
+export type FogSnapshot = {
+  width: number;
+  height: number;
+  /** Flat Uint8Array [y * width + x]. Serialised as number[] for store transfer. */
+  data: Uint8Array | number[];
+};
+
 export type GameStateSnapshot = {
   tick: number;
   elapsedMs: number;
   resources: Record<Faction, { wood: number; water: number; mana: number }>;
   entities: EntitySnapshot[];
   tiles: TileSnapshot[];
+  /** Per-faction fog — only the player's own faction fog is sent to each client. */
+  fog: Record<Faction, FogSnapshot>;
 };

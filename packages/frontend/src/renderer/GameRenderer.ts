@@ -1,8 +1,8 @@
 // PixiJS renderer — game world only (map tiles, units, buildings, fog, effects).
 // No UI elements drawn here. No React imports.
 
-import { Application, Assets, Container, Sprite, Rectangle, Ticker } from "pixi.js";
-import type { GameStateSnapshot, TileSnapshot } from "@neither/shared";
+import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
+import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot } from "@neither/shared";
 import { terrainAssets } from "./assets.js";
 
 export const TILE_SIZE = 64; // pixels at zoom level 1.0
@@ -20,6 +20,10 @@ export class GameRenderer {
   private app: Application | null = null;
   private worldContainer: Container | null = null;
   private tileContainer: Container | null = null;
+  private fogContainer: Container | null = null;
+  private fogTexture: RenderTexture | null = null;
+  private fogSprite: Sprite | null = null;
+  private activeFaction: Faction = "wizards";
 
   private zoomIndex = 2; // default zoom 1.0
   private cameraX = 0;
@@ -62,6 +66,9 @@ export class GameRenderer {
     this.tileContainer = new Container();
     this.worldContainer.addChild(this.tileContainer);
 
+    this.fogContainer = new Container();
+    this.worldContainer.addChild(this.fogContainer);
+
     this._attachInputHandlers();
     await this._preloadTerrainTextures();
     if (this.destroyed) return;
@@ -78,13 +85,58 @@ export class GameRenderer {
   render(state: GameStateSnapshot): void {
     if (!this.tileContainer || !this.texturesLoaded) return;
 
-    // Only rebuild tile sprites when the map changes (first render or map size change)
     const tileCount = state.tiles.length;
     if (this.tileContainer.children.length !== tileCount) {
       this._buildTileLayer(state.tiles);
     }
 
+    this._renderFog(state.fog[this.activeFaction]);
     this._applyCamera();
+  }
+
+  setActiveFaction(faction: Faction): void {
+    this.activeFaction = faction;
+  }
+
+  private _renderFog(fog: FogSnapshot): void {
+    if (!this.fogContainer || !this.app) return;
+
+    const { width, height, data } = fog;
+    const pixelW = width * TILE_SIZE;
+    const pixelH = height * TILE_SIZE;
+
+    // Create or recreate RenderTexture when map size changes
+    if (!this.fogTexture || this.fogTexture.width !== pixelW || this.fogTexture.height !== pixelH) {
+      this.fogTexture?.destroy(true);
+      this.fogSprite?.destroy();
+      this.fogTexture = RenderTexture.create({ width: pixelW, height: pixelH });
+      this.fogSprite = new Sprite(this.fogTexture);
+      this.fogContainer.removeChildren();
+      this.fogContainer.addChild(this.fogSprite);
+    }
+
+    // Draw fog tiles onto RenderTexture
+    const g = new Graphics();
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const v = data[y * width + x];
+        if (v === 2) continue; // VISIBLE — no overlay
+
+        const px = x * TILE_SIZE;
+        const py = y * TILE_SIZE;
+
+        if (v === 0) {
+          // UNEXPLORED — solid black
+          g.rect(px, py, TILE_SIZE, TILE_SIZE).fill({ color: 0x000000, alpha: 1 });
+        } else {
+          // EXPLORED — semi-transparent dark overlay, desaturating the tile beneath
+          g.rect(px, py, TILE_SIZE, TILE_SIZE).fill({ color: 0x050512, alpha: 0.65 });
+        }
+      }
+    }
+
+    this.app.renderer.render({ container: g, target: this.fogTexture, clear: true });
+    g.destroy();
   }
 
   private _buildTileLayer(tiles: TileSnapshot[]): void {
@@ -245,6 +297,8 @@ export class GameRenderer {
       canvas.removeEventListener("pointerup", this._onPointerUp);
       canvas.removeEventListener("pointerleave", this._onPointerUp);
     }
+    this.fogTexture?.destroy(true);
+    this.fogTexture = null;
     this.app?.destroy(true);
     this.app = null;
   }

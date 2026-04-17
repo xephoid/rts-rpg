@@ -21,7 +21,7 @@ export abstract class Entity {
   readonly stats: StatBlock;
 
   constructor(params: {
-    id?: string;
+    id?: string | undefined;
     kind: EntityKind;
     faction: Faction;
     typeKey: string;
