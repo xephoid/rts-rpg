@@ -2,22 +2,11 @@
 // Updated by the game loop via pushGameState(). React components read from here.
 // The simulation itself does NOT use this store directly.
 import { create } from "zustand";
-
-export type ResourcePool = {
-  wood: number;
-  water: number;
-  mana: number;
-};
-
-export type GameStateMirror = {
-  tick: number;
-  resources: ResourcePool;
-  // TODO: next step — add unit list, building list, diplomacy states, fog data
-};
+import type { GameStateSnapshot } from "@neither/shared";
 
 export type GameStore = {
-  gameState: GameStateMirror | null;
-  pushGameState: (state: GameStateMirror) => void;
+  gameState: GameStateSnapshot | null;
+  pushGameState: (state: GameStateSnapshot) => void;
 };
 
 export const useGameStore = create<GameStore>((set) => ({
