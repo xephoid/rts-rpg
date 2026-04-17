@@ -11,6 +11,7 @@ export function App() {
   useEffect(() => {
     if (!canvasRef.current) return;
 
+    let cancelled = false;
     const container = canvasRef.current;
     const renderer = new GameRenderer();
     const engine = new GameEngine({
@@ -22,14 +23,17 @@ export function App() {
       },
     });
 
-    let started = false;
     renderer.init(container).then(() => {
-      started = true;
+      if (cancelled) {
+        renderer.destroy();
+        return;
+      }
       engine.start();
     });
 
     return () => {
-      if (started) engine.stop();
+      cancelled = true;
+      engine.stop();
       renderer.destroy();
     };
   }, [pushGameState]);

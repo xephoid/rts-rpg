@@ -34,6 +34,7 @@ export class GameRenderer {
   private mapWidthTiles = 0;
   private mapHeightTiles = 0;
   private texturesLoaded = false;
+  private initialized = false;
 
   private readonly config: RendererConfig;
 
@@ -60,6 +61,7 @@ export class GameRenderer {
 
     this._attachInputHandlers();
     await this._preloadTerrainTextures();
+    this.initialized = true;
   }
 
   private async _preloadTerrainTextures(): Promise<void> {
@@ -219,6 +221,11 @@ export class GameRenderer {
   }
 
   destroy(): void {
+    if (!this.initialized) {
+      // init() never completed — PixiJS internals are not set up, nothing to tear down
+      this.app = null;
+      return;
+    }
     const canvas = this.app?.canvas as HTMLCanvasElement | undefined;
     if (canvas) {
       canvas.removeEventListener("wheel", this._onWheel);
