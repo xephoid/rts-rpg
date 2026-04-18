@@ -421,13 +421,17 @@ export class GameEngine {
 
     const pop = this._computePopulation();
     const { count, cap } = pop[building.faction];
-    // Count units already pending in all buildings' queues so we don't overshoot the cap
+    // Count units already pending in all buildings' queues so we don't overshoot the cap.
+    // Platforms are excluded (same rule as _computePopulation) so a full Core pop doesn't
+    // block platform production.
+    const consumesPop = (typeKey: string) => !ROBOT_PLATFORM_TYPES.has(typeKey);
     let pendingPop = 0;
     for (const b of this.entities.buildingsByFaction(building.faction)) {
-      if (b.state.kind === "producing") pendingPop++;
-      pendingPop += b.productionQueue.length;
+      if (b.state.kind === "producing" && consumesPop(b.state.unitTypeKey)) pendingPop++;
+      pendingPop += b.productionQueue.filter(consumesPop).length;
     }
-    if (cap > 0 && count + pendingPop >= cap) return;
+    // Also skip the pop-cap check entirely when the unit being queued doesn't consume pop
+    if (cap > 0 && consumesPop(unitTypeKey) && count + pendingPop >= cap) return;
 
     // Deduct resources at enqueue time
     res.wood -= cost.wood;
