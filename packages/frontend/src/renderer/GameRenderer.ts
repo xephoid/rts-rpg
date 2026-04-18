@@ -101,12 +101,6 @@ export class GameRenderer {
   private _allTiles: TileSnapshot[] = [];
   private _lastViewportBounds = { x0: -1, y0: -1, x1: -1, y1: -1 };
 
-  // Fog dirty tracking
-  private _lastFogCameraX = -1;
-  private _lastFogCameraY = -1;
-  private _lastFogZoomIndex = -1;
-  private _lastFogDataRef: Uint8Array | number[] | null = null;
-
   // Build mode ghost state
   private ghostContainer: Container | null = null;
   private buildMode: { typeKey: string; footprintTiles: number; faction: "wizards" | "robots" } | null = null;
@@ -350,21 +344,9 @@ export class GameRenderer {
       this.app.stage.addChildAt(this.fogSprite, worldIdx + 1);
       // Bring rubber band back to top
       if (this.rubberBandContainer) this.app.stage.addChild(this.rubberBandContainer);
-      // Reset dirty markers so we redraw immediately
-      this._lastFogDataRef = null;
     }
 
-    // Skip redraw when camera, zoom, and fog data are all unchanged
-    if (data === this._lastFogDataRef &&
-        this.cameraX === this._lastFogCameraX &&
-        this.cameraY === this._lastFogCameraY &&
-        this.zoomIndex === this._lastFogZoomIndex) return;
-
-    this._lastFogDataRef = data;
-    this._lastFogCameraX = this.cameraX;
-    this._lastFogCameraY = this.cameraY;
-    this._lastFogZoomIndex = this.zoomIndex;
-
+    // Viewport culling keeps this to ~400 rects/frame — cheap enough to redraw every tick.
     // Only draw fog rects for tiles in current viewport (+1 tile buffer for smooth panning)
     const BUFFER = 1;
     const tx0 = Math.max(0, Math.floor(this.cameraX / tilePx) - BUFFER);

@@ -107,6 +107,10 @@ export function App() {
       },
     });
     rendererRef.current = renderer;
+    // Set immediately — the sync effect only fires on changes, so if the user picked
+    // the store's default faction ("robots") it would never run and the renderer
+    // would stay on its own default ("wizards").
+    renderer.setActiveFaction(useUIStore.getState().activeFaction);
 
     const engine = new GameEngine({
       mapSize: mapSizeRef.current,
