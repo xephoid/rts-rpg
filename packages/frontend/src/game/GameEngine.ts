@@ -41,6 +41,11 @@ export type ResourcePool = { wood: number; water: number; mana: number };
 const FACTIONS: Faction[] = ["wizards", "robots"];
 /** Ticks a unit waits on a blocked waypoint before replanning (~167ms at 60 ticks/s). */
 const REPLAN_THRESHOLD = 10;
+/**
+ * Unit types allowed to issue gather orders. Leaders + basic civilian units only.
+ * TODO(capabilities): make this data-driven once a unit capability system exists.
+ */
+const GATHERER_TYPES = new Set(["archmage", "surf", "core", "subject"]);
 
 export class GameEngine {
   readonly entities: EntityManager;
@@ -137,22 +142,22 @@ export class GameEngine {
       }),
     );
 
-    // 2 evokers flanking
-    const evokerStats = wizardUnitStats.evoker!;
+    // 2 surfs flanking
+    const surfStats = wizardUnitStats.surf!;
     for (let i = 0; i < 2; i++) {
       this.entities.add(
         new UnitEntity({
           faction: "wizards",
-          typeKey: "evoker",
+          typeKey: "surf",
           position: { x: wizPos.x + (i === 0 ? -1 : 1), y: wizPos.y + 4 },
           stats: {
-            maxHp: evokerStats.hp,
-            damage: evokerStats.damage,
-            range: evokerStats.range,
-            speed: evokerStats.speed,
-            charisma: evokerStats.charisma,
-            armor: evokerStats.armor,
-            capacity: evokerStats.capacity,
+            maxHp: surfStats.hp,
+            damage: surfStats.damage,
+            range: surfStats.range,
+            speed: surfStats.speed,
+            charisma: surfStats.charisma,
+            armor: surfStats.armor,
+            capacity: surfStats.capacity,
           },
         }),
       );
@@ -287,6 +292,7 @@ export class GameEngine {
     const entity = this.entities.get(entityId);
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
+    if (!GATHERER_TYPES.has(unit.typeKey)) return;
 
     // Release any current deposit occupancy before reassigning
     this._releaseDepositOccupancy(unit);

@@ -56,9 +56,8 @@ export class GameRenderer {
   private dragStartCamX = 0;
   private dragStartCamY = 0;
 
-  // Deposit rendering
-  private depositContainer: Container | null = null;
-  private lastDeposits: DepositSnapshot[] = [];
+  // Deposit lookup for context-smart right-click (keyed "x,y" → deposit)
+  private lastDeposits = new Map<string, DepositSnapshot>();
 
   // Entity rendering
   private entityContainer: Container | null = null;
@@ -110,9 +109,6 @@ export class GameRenderer {
     this.tileContainer = new Container();
     this.worldContainer.addChild(this.tileContainer);
 
-    this.depositContainer = new Container();
-    this.worldContainer.addChild(this.depositContainer);
-
     this.entityContainer = new Container();
     this.worldContainer.addChild(this.entityContainer);
 
@@ -154,8 +150,10 @@ export class GameRenderer {
       this._buildTileLayer(state.tiles);
     }
 
-    this.lastDeposits = state.deposits ?? [];
-    this._renderDeposits(this.lastDeposits);
+    this.lastDeposits.clear();
+    for (const d of state.deposits ?? []) {
+      this.lastDeposits.set(`${d.position.x},${d.position.y}`, d);
+    }
     this._renderEntities(state.entities);
     this._renderFog(this.lastFog);
     this._applyCamera();
@@ -191,30 +189,6 @@ export class GameRenderer {
       sprite.tint = entity.faction === "wizards" ? 0xa855f7 : 0xeab308;
     }
     return sprite;
-  }
-
-  private _renderDeposits(deposits: DepositSnapshot[]): void {
-    if (!this.depositContainer) return;
-    this.depositContainer.removeChildren();
-
-    for (const deposit of deposits) {
-      if (this._fogValueAt(deposit.position.x, deposit.position.y) < 2) continue;
-
-      const cx = (deposit.position.x + 0.5) * TILE_SIZE;
-      const cy = (deposit.position.y + 0.5) * TILE_SIZE;
-
-      const g = new Graphics();
-      if (deposit.kind === "wood") {
-        g.circle(cx, cy, 14)
-          .fill({ color: 0x2d7a1b, alpha: 0.85 })
-          .stroke({ color: 0x8b5e3c, width: 2 });
-      } else {
-        g.circle(cx, cy, 14)
-          .fill({ color: 0x1a6ea6, alpha: 0.85 })
-          .stroke({ color: 0x7dd3fc, width: 2 });
-      }
-      this.depositContainer.addChild(g);
-    }
   }
 
   private _renderEntities(entities: EntitySnapshot[]): void {
@@ -598,14 +572,12 @@ export class GameRenderer {
       return;
     }
 
-    const hitDeposit = this.lastDeposits.find((d) => {
-      if (this._fogValueAt(d.position.x, d.position.y) < 2) return false;
-      const dx = tileX - (d.position.x + 0.5);
-      const dy = tileY - (d.position.y + 0.5);
-      return dx * dx + dy * dy < 0.6 * 0.6;
-    });
-    if (hitDeposit) {
-      this.config.onGatherOrder?.(friendlyIds, hitDeposit.id);
+    const tx = Math.floor(tileX);
+    const ty = Math.floor(tileY);
+    const hitDeposit = this.lastDeposits.get(`${tx},${ty}`);
+    const depositVisible = hitDeposit && this._fogValueAt(tx, ty) === 2 ? hitDeposit : null;
+    if (depositVisible) {
+      this.config.onGatherOrder?.(friendlyIds, depositVisible.id);
       return;
     }
 

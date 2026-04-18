@@ -94,28 +94,23 @@ describe("generateMap", () => {
     }
   });
 
-  it("wood deposits have quantity within configured range", () => {
+  it("wood deposits have the fixed configured quantity", () => {
     const grid = makeGrid();
     const { deposits } = generateMap(grid, { size: "small", seed: 42 });
     const woodDeposits = deposits.filter((d) => d.kind === "wood");
     expect(woodDeposits.length).toBeGreaterThan(0);
     for (const dep of woodDeposits) {
-      expect(dep.quantity).toBeGreaterThanOrEqual(400);
-      expect(dep.quantity).toBeLessThanOrEqual(800);
+      expect(dep.quantity).toBe(250);
     }
   });
 
-  it("no two wood deposits are within 6 tiles of each other", () => {
+  it("every wood deposit is on a forest tile (one-per-tile model)", () => {
     const grid = makeGrid();
     const { deposits } = generateMap(grid, { size: "small", seed: 42 });
     const wood = deposits.filter((d) => d.kind === "wood");
-    for (let i = 0; i < wood.length; i++) {
-      for (let j = i + 1; j < wood.length; j++) {
-        const dx = wood[i]!.position.x - wood[j]!.position.x;
-        const dy = wood[i]!.position.y - wood[j]!.position.y;
-        expect(dx * dx + dy * dy).toBeGreaterThanOrEqual(36);
-      }
-    }
+    // All deposit positions are unique — one deposit per tile
+    const positions = wood.map((d) => `${d.position.x},${d.position.y}`);
+    expect(new Set(positions).size).toBe(positions.length);
   });
 
   it("all deposit IDs are unique", () => {

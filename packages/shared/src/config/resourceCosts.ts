@@ -115,18 +115,15 @@ export const researchCosts = {
 // ── Resource deposits ─────────────────────────────────────────────────────────
 
 export const woodDeposit = {
-  // Initial guess: deposits are finite. Each deposit has 400-800 wood.
-  // Rationale: forces expansion and prevents turtling forever.
-  quantityMin: 400,
-  quantityMax: 800,
-  regenerates: false, // Initial guess: finite — adjust if turtling is a problem
+  // Initial guess: every forest tile has 250 wood. Adjust after playtesting.
+  quantity: 250,
+  regenerates: false,
 };
 
 export const waterDeposit = {
-  // Initial guess: large but finite — water is harder to exhaust than wood,
-  // but long games eventually require finding new sources.
-  quantityMin: 2000,
-  quantityMax: 5000,
+  // Initial guess: every water tile has 1000 water — water is harder to exhaust than wood.
+  // Adjust after playtesting.
+  quantity: 1000,
   regenerates: false,
 };
 

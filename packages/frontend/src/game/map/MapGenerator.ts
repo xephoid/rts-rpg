@@ -4,6 +4,9 @@
 import { createNoise2D } from "simplex-noise";
 import type { TerrainType, Vec2 } from "@neither/shared";
 import { woodDeposit, waterDeposit, mapSizes } from "@neither/shared";
+
+// Every forest tile is a wood resource; every water tile is a water resource.
+// Quantities are fixed per tile — see resourceCosts.ts for values.
 import type { Grid } from "../spatial/Grid.js";
 
 export type MapSize = "small" | "medium" | "large";
@@ -92,70 +95,31 @@ export function generateMap(grid: Grid, options: MapGeneratorOptions): Omit<Gene
   }
 
   // ── Resource deposit pass ───────────────────────────────────────────────────
+  // One deposit per terrain tile: forest → wood, water → water.
+  // Units right-click a tile to gather from it. For water tiles (impassable)
+  // the engine paths the unit to the nearest adjacent passable tile.
   const deposits: ResourceDeposit[] = [];
   let depositIndex = 0;
 
-  // Wood deposits: scatter in forest clusters
-  const depositNoise = createNoise2D(() => rng());
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const tile = grid.getTile(x, y);
-      if (tile?.terrain !== "forest") continue;
-
-      // Only place deposit at local noise maxima within forest
-      const dn = depositNoise(x / W * 12, y / H * 12);
-      if (dn < 0.55) continue;
-
-      // Minimum spacing — no two deposits within 6 tiles
-      const tooClose = deposits.some((d) => {
-        const dx = d.position.x - x;
-        const dy = d.position.y - y;
-        return dx * dx + dy * dy < 36;
-      });
-      if (tooClose) continue;
-
-      const quantity =
-        woodDeposit.quantityMin +
-        Math.floor(rng() * (woodDeposit.quantityMax - woodDeposit.quantityMin + 1));
-
-      deposits.push({
-        id: `deposit_wood_${depositIndex++}`,
-        kind: "wood",
-        position: { x, y },
-        quantity,
-      });
-
-      // Update tile wood quantity
-      grid.setTerrain(x, y, "forest", quantity);
-    }
-  }
-
-  // Water deposits: place near water edges (water-adjacent open tiles)
-  for (let y = 1; y < H - 1; y++) {
-    for (let x = 1; x < W - 1; x++) {
-      if (grid.getTile(x, y)?.terrain !== "open") continue;
-
-      const adjacentToWater = grid.neighbours4(x, y).some(
-        ({ x: nx, y: ny }) => grid.getTile(nx, ny)?.terrain === "water",
-      );
-      if (!adjacentToWater) continue;
-
-      const wn = depositNoise(x / W * 15 + 100, y / H * 15 + 100);
-      if (wn < 0.7) continue;
-
-      const tooClose = deposits.some((d) => {
-        const dx = d.position.x - x;
-        const dy = d.position.y - y;
-        return dx * dx + dy * dy < 64;
-      });
-      if (tooClose) continue;
-
-      deposits.push({
-        id: `deposit_water_${depositIndex++}`,
-        kind: "water",
-        position: { x, y },
-        quantity: waterDeposit.quantityMin + Math.floor(rng() * (waterDeposit.quantityMax - waterDeposit.quantityMin + 1)),
-      });
+      if (tile?.terrain === "forest") {
+        deposits.push({
+          id: `deposit_wood_${depositIndex++}`,
+          kind: "wood",
+          position: { x, y },
+          quantity: woodDeposit.quantity,
+        });
+        grid.setTerrain(x, y, "forest", woodDeposit.quantity);
+      } else if (tile?.terrain === "water") {
+        deposits.push({
+          id: `deposit_water_${depositIndex++}`,
+          kind: "water",
+          position: { x, y },
+          quantity: waterDeposit.quantity,
+        });
+      }
     }
   }
 
