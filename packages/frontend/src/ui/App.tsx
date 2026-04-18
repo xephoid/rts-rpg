@@ -23,6 +23,23 @@ export function App() {
   const clearPendingStop = useUIStore((s) => s.clearPendingStop);
   const pendingProduction = useUIStore((s) => s.pendingProduction);
   const clearPendingProduction = useUIStore((s) => s.clearPendingProduction);
+  const pendingCancelProduction = useUIStore((s) => s.pendingCancelProduction);
+  const clearPendingCancelProduction = useUIStore((s) => s.clearPendingCancelProduction);
+  const buildMode = useUIStore((s) => s.buildMode);
+  const pendingBuildOrder = useUIStore((s) => s.pendingBuildOrder);
+  const clearPendingBuildOrder = useUIStore((s) => s.clearPendingBuildOrder);
+  const pendingDemolish = useUIStore((s) => s.pendingDemolish);
+  const clearPendingDemolish = useUIStore((s) => s.clearPendingDemolish);
+  const pendingResumeConstruction = useUIStore((s) => s.pendingResumeConstruction);
+  const clearPendingResumeConstruction = useUIStore((s) => s.clearPendingResumeConstruction);
+  const pendingResearch = useUIStore((s) => s.pendingResearch);
+  const clearPendingResearch = useUIStore((s) => s.clearPendingResearch);
+  const pendingCancelResearch = useUIStore((s) => s.pendingCancelResearch);
+  const clearPendingCancelResearch = useUIStore((s) => s.clearPendingCancelResearch);
+  const pendingAttach = useUIStore((s) => s.pendingAttach);
+  const clearPendingAttach = useUIStore((s) => s.clearPendingAttach);
+  const pendingDetach = useUIStore((s) => s.pendingDetach);
+  const clearPendingDetach = useUIStore((s) => s.clearPendingDetach);
 
   // Init renderer + engine
   useEffect(() => {
@@ -52,6 +69,20 @@ export function App() {
       onTalkOrder: (unitIds, targetId) => {
         for (const id of unitIds) engineRef.current?.issueTalkOrder(id, targetId);
       },
+      onResumeConstructionOrder: (unitIds, buildingId) => {
+        for (const id of unitIds) {
+          useUIStore.getState().issueResumeConstruction(id, buildingId);
+        }
+      },
+      onAttachOrder: (coreId, platformId) => {
+        useUIStore.getState().issueAttach(coreId, platformId);
+      },
+      onBuildOrder: (tileX, tileY) => {
+        const bm = useUIStore.getState().buildMode;
+        if (!bm) return;
+        useUIStore.getState().issueBuildOrder(bm.unitId, bm.buildingTypeKey, { x: tileX, y: tileY });
+        useUIStore.getState().setBuildMode(null);
+      },
       onMoveOrder: (entityIds, target) => {
         const { pendingPatrolIds, setPendingPatrolIds } = useUIStore.getState();
         if (pendingPatrolIds && pendingPatrolIds.length > 0) {
@@ -77,6 +108,7 @@ export function App() {
         pushGameState(state);
         renderer.render(state);
       },
+      onAlert: (message) => useUIStore.getState().pushAlert(message),
     });
     engineRef.current = engine;
 
@@ -133,6 +165,78 @@ export function App() {
     engineRef.current?.issueProductionOrder(pendingProduction.buildingId, pendingProduction.unitTypeKey);
     clearPendingProduction();
   }, [pendingProduction, clearPendingProduction]);
+
+  // Consume pending cancel production orders
+  useEffect(() => {
+    if (!pendingCancelProduction) return;
+    engineRef.current?.issueCancelProduction(pendingCancelProduction.buildingId);
+    clearPendingCancelProduction();
+  }, [pendingCancelProduction, clearPendingCancelProduction]);
+
+  // Sync build mode to renderer (ghost placement)
+  useEffect(() => {
+    rendererRef.current?.setBuildMode(
+      buildMode
+        ? { typeKey: buildMode.buildingTypeKey, footprintTiles: buildMode.footprintTiles, faction: buildMode.faction }
+        : null
+    );
+  }, [buildMode]);
+
+  // Consume pending build orders
+  useEffect(() => {
+    if (!pendingBuildOrder) return;
+    engineRef.current?.issueBuildOrder(
+      pendingBuildOrder.unitId,
+      pendingBuildOrder.buildingTypeKey,
+      pendingBuildOrder.tilePos,
+    );
+    clearPendingBuildOrder();
+  }, [pendingBuildOrder, clearPendingBuildOrder]);
+
+  // Consume pending demolish orders
+  useEffect(() => {
+    if (!pendingDemolish) return;
+    engineRef.current?.issueDemolishOrder(pendingDemolish.buildingId);
+    clearPendingDemolish();
+  }, [pendingDemolish, clearPendingDemolish]);
+
+  // Consume pending resume construction orders
+  useEffect(() => {
+    if (!pendingResumeConstruction) return;
+    engineRef.current?.issueResumeConstructionOrder(
+      pendingResumeConstruction.unitId,
+      pendingResumeConstruction.buildingId,
+    );
+    clearPendingResumeConstruction();
+  }, [pendingResumeConstruction, clearPendingResumeConstruction]);
+
+  // Consume pending research orders
+  useEffect(() => {
+    if (!pendingResearch) return;
+    engineRef.current?.issueResearchOrder(pendingResearch.buildingId, pendingResearch.researchKey);
+    clearPendingResearch();
+  }, [pendingResearch, clearPendingResearch]);
+
+  // Consume pending cancel research orders
+  useEffect(() => {
+    if (!pendingCancelResearch) return;
+    engineRef.current?.issueCancelResearchOrder(pendingCancelResearch.buildingId);
+    clearPendingCancelResearch();
+  }, [pendingCancelResearch, clearPendingCancelResearch]);
+
+  // Consume pending attach orders
+  useEffect(() => {
+    if (!pendingAttach) return;
+    engineRef.current?.issueAttachOrder(pendingAttach.coreId, pendingAttach.platformId);
+    clearPendingAttach();
+  }, [pendingAttach, clearPendingAttach]);
+
+  // Consume pending detach orders
+  useEffect(() => {
+    if (!pendingDetach) return;
+    engineRef.current?.issueDetachOrder(pendingDetach.platformId);
+    clearPendingDetach();
+  }, [pendingDetach, clearPendingDetach]);
 
   // WASD panning
   useEffect(() => {

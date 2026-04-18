@@ -12,11 +12,25 @@ import {
   levelUpBonuses,
   unitRoles,
   namedLeaders,
+  unitPopulationBonus,
   robotUnitCosts,
   wizardUnitCosts,
+  robotBuildingCosts,
+  wizardBuildingCosts,
   gatherRates,
+  GATHER_INTERVAL_TICKS,
+  gatherXpPerTrip,
   TICKS_PER_SEC,
   autoCollectionRates,
+  AUTO_COLLECTION_INTERVAL_TICKS,
+  BUILDER_UNIT_TYPES,
+  SINGLE_USE_BUILDERS,
+  unitBuildingRequirements,
+  resourceDropoffBuildings,
+  buildingRequiresAdjacentWater,
+  buildingResearch,
+  researchCosts,
+  xpRates,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
@@ -26,6 +40,7 @@ import { SpatialIndex } from "./spatial/SpatialIndex.js";
 import { generateMap, type ResourceDeposit, type MapSize } from "./map/MapGenerator.js";
 import { FogOfWar } from "./fog/FogOfWar.js";
 import { LastSeenMap } from "./fog/LastSeenMap.js";
+import { Entity } from "./entities/Entity.js";
 import { UnitEntity } from "./entities/UnitEntity.js";
 import { BuildingEntity } from "./entities/BuildingEntity.js";
 import { findPath } from "./spatial/Pathfinder.js";
@@ -34,6 +49,7 @@ export type GameEngineConfig = {
   mapSize?: MapSize;
   seed?: number | undefined;
   onTick: (state: GameStateSnapshot) => void;
+  onAlert?: (message: string) => void;
 };
 
 export type ResourcePool = { wood: number; water: number; mana: number };
@@ -45,13 +61,27 @@ const REPLAN_THRESHOLD = 10;
  * Unit types allowed to issue gather orders. Leaders + basic civilian units only.
  * TODO(capabilities): make this data-driven once a unit capability system exists.
  */
-const GATHERER_TYPES = new Set(["archmage", "surf", "core", "subject"]);
+const GATHERER_TYPES = new Set(["archmage", "surf", "waterCollectionPlatform", "woodChopperPlatform"]);
+/** Each robot platform that gathers may only harvest its specific resource kind. */
+const PLATFORM_RESOURCE_RESTRICTION: Record<string, "wood" | "water"> = {
+  woodChopperPlatform: "wood",
+  waterCollectionPlatform: "water",
+};
+const ROBOT_PLATFORM_TYPES = new Set([
+  "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform",
+  "spinnerPlatform", "spitterPlatform", "infiltrationPlatform",
+  "largeCombatPlatform", "probePlatform", "wallPlatform",
+]);
 /**
  * Max tile radius a gatherer will search for the next deposit after exhausting one.
  * Initial guess: ~20 tiles (~1/3 of small map width). Adjust after playtesting.
  * TODO: ideally driven by unit vision range from FogOfWar once that API is stable.
  */
 const GATHER_SEARCH_RADIUS = 20;
+/** Default unit vision radius in tiles. Separate from attack range. Initial guess — increase after playtesting. */
+const UNIT_VISION_TILES = 8;
+/** Vision radius for an unattached robot platform — low until a Core provides guidance. */
+const UNATTACHED_PLATFORM_VISION_TILES = 2;
 
 export class GameEngine {
   readonly entities: EntityManager;
@@ -63,6 +93,7 @@ export class GameEngine {
 
   private readonly loop: GameLoop;
   private readonly onTick: (state: GameStateSnapshot) => void;
+  private readonly onAlert: ((message: string) => void) | undefined;
   private readonly fog: Record<Faction, FogOfWar>;
   private readonly lastSeen: Record<Faction, LastSeenMap>;
 
@@ -74,8 +105,15 @@ export class GameEngine {
   /** depositId → unitId currently harvesting that deposit (one gatherer per tile). */
   private readonly depositOccupants = new Map<string, string>();
 
-  constructor({ mapSize = "medium", seed, onTick }: GameEngineConfig) {
+  /** Research items permanently unlocked per faction. */
+  private readonly _completedResearch = new Map<Faction, Set<string>>([
+    ["wizards", new Set<string>()],
+    ["robots",  new Set<string>()],
+  ]);
+
+  constructor({ mapSize = "medium", seed, onTick, onAlert }: GameEngineConfig) {
     this.onTick = onTick;
+    this.onAlert = onAlert;
     this.entities = new EntityManager();
     this.events = new EventBus();
     const size = mapSizes[mapSize];
@@ -127,46 +165,44 @@ export class GameEngine {
     this.entities.add(wizCastle);
     this._blockBuildingTiles(wizCastle);
 
-    // Named archmage leader
+    // Named archmage leader — add before finding next tile so _findSpawnTile skips this position
     const archmageStats = wizardUnitStats[namedLeaders.wizards.typeKey]!;
-    this.entities.add(
-      new UnitEntity({
-        faction: "wizards",
-        typeKey: namedLeaders.wizards.typeKey,
-        position: { x: wizPos.x, y: wizPos.y + 4 },
-        stats: {
-          maxHp: archmageStats.hp,
-          damage: archmageStats.damage,
-          range: archmageStats.range,
-          speed: archmageStats.speed,
-          charisma: archmageStats.charisma,
-          armor: archmageStats.armor,
-          capacity: archmageStats.capacity,
-        },
-        isNamed: true,
-        name: namedLeaders.wizards.name,
-      }),
-    );
+    const archmage = new UnitEntity({
+      faction: "wizards",
+      typeKey: namedLeaders.wizards.typeKey,
+      position: this._findSpawnTile(wizCastle) ?? { x: wizPos.x, y: wizPos.y + 4 },
+      stats: {
+        maxHp: archmageStats.hp,
+        damage: archmageStats.damage,
+        range: archmageStats.range,
+        speed: archmageStats.speed,
+        charisma: archmageStats.charisma,
+        armor: archmageStats.armor,
+        capacity: archmageStats.capacity,
+      },
+      isNamed: true,
+      name: namedLeaders.wizards.name,
+    });
+    this.entities.add(archmage);
 
     // 2 surfs flanking
     const surfStats = wizardUnitStats.surf!;
     for (let i = 0; i < 2; i++) {
-      this.entities.add(
-        new UnitEntity({
-          faction: "wizards",
-          typeKey: "surf",
-          position: { x: wizPos.x + (i === 0 ? -1 : 1), y: wizPos.y + 4 },
-          stats: {
-            maxHp: surfStats.hp,
-            damage: surfStats.damage,
-            range: surfStats.range,
-            speed: surfStats.speed,
-            charisma: surfStats.charisma,
-            armor: surfStats.armor,
-            capacity: surfStats.capacity,
-          },
-        }),
-      );
+      const surf = new UnitEntity({
+        faction: "wizards",
+        typeKey: "surf",
+        position: this._findSpawnTile(wizCastle) ?? { x: wizPos.x + (i === 0 ? -1 : 1), y: wizPos.y + 4 },
+        stats: {
+          maxHp: surfStats.hp,
+          damage: surfStats.damage,
+          range: surfStats.range,
+          speed: surfStats.speed,
+          charisma: surfStats.charisma,
+          armor: surfStats.armor,
+          capacity: surfStats.capacity,
+        },
+      });
+      this.entities.add(surf);
     }
 
     // Robot home
@@ -189,13 +225,33 @@ export class GameEngine {
     this.entities.add(robHome);
     this._blockBuildingTiles(robHome);
 
-    // Named Motherboard leader
+    // Named Motherboard leader — add before finding next tile
     const coreStats = robotUnitStats.core!;
-    this.entities.add(
-      new UnitEntity({
+    const motherboard = new UnitEntity({
+      faction: "robots",
+      typeKey: namedLeaders.robots.typeKey,
+      position: this._findSpawnTile(robHome) ?? { x: robPos.x, y: robPos.y + 4 },
+      stats: {
+        maxHp: coreStats.hpWood,
+        damage: coreStats.damage,
+        range: coreStats.range,
+        speed: coreStats.speed,
+        charisma: coreStats.charisma,
+        armor: coreStats.armorWood,
+        capacity: coreStats.capacity,
+      },
+      isNamed: true,
+      name: namedLeaders.robots.name,
+    });
+    motherboard.materialType = "wood";
+    this.entities.add(motherboard);
+
+    // 2 regular cores flanking
+    for (let i = 0; i < 2; i++) {
+      const core = new UnitEntity({
         faction: "robots",
-        typeKey: namedLeaders.robots.typeKey,
-        position: { x: robPos.x, y: robPos.y + 4 },
+        typeKey: "core",
+        position: this._findSpawnTile(robHome) ?? { x: robPos.x + (i === 0 ? -1 : 1), y: robPos.y + 4 },
         stats: {
           maxHp: coreStats.hpWood,
           damage: coreStats.damage,
@@ -205,29 +261,9 @@ export class GameEngine {
           armor: coreStats.armorWood,
           capacity: coreStats.capacity,
         },
-        isNamed: true,
-        name: namedLeaders.robots.name,
-      }),
-    );
-
-    // 2 regular cores flanking
-    for (let i = 0; i < 2; i++) {
-      this.entities.add(
-        new UnitEntity({
-          faction: "robots",
-          typeKey: "core",
-          position: { x: robPos.x + (i === 0 ? -1 : 1), y: robPos.y + 4 },
-          stats: {
-            maxHp: coreStats.hpWood,
-            damage: coreStats.damage,
-            range: coreStats.range,
-            speed: coreStats.speed,
-            charisma: coreStats.charisma,
-            armor: coreStats.armorWood,
-            capacity: coreStats.capacity,
-          },
-        }),
-      );
+      });
+      core.materialType = "wood";
+      this.entities.add(core);
     }
   }
 
@@ -244,6 +280,7 @@ export class GameEngine {
     const entity = this.entities.get(entityId);
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
+    if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return; // unattached platforms can't self-move
     this._releaseDepositOccupancy(unit);
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
 
@@ -279,6 +316,7 @@ export class GameEngine {
     const entity = this.entities.get(entityId);
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
+    if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
     this._releaseDepositOccupancy(unit);
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
     const goal = this._nearestPassable({ x: Math.floor(pointB.x), y: Math.floor(pointB.y) });
@@ -306,6 +344,10 @@ export class GameEngine {
     const deposit = this.deposits.find((d) => d.id === depositId);
     if (!deposit || deposit.quantity <= 0) return;
 
+    // Robot platform types can only harvest their designated resource kind
+    const restriction = PLATFORM_RESOURCE_RESTRICTION[unit.typeKey];
+    if (restriction && deposit.kind !== restriction) return;
+
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
 
     const blockedByUnits: Vec2[] = [];
@@ -332,10 +374,9 @@ export class GameEngine {
     const entity = this.entities.get(unitId);
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
+    if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
     this._releaseDepositOccupancy(unit);
-    // TODO(phase-combat): _processAttacks() not yet implemented — sets state only.
-    // When combat phase lands: range-check target, path into range, then deal damage each tick.
-    unit.state = { kind: "attacking", targetId };
+    unit.state = { kind: "attacking", targetId, path: [], yieldTicks: 0 };
   }
 
   issueTalkOrder(unitId: string, targetId: string): void {
@@ -352,6 +393,19 @@ export class GameEngine {
     if (!entity || entity.kind !== "building") return;
     const building = entity as BuildingEntity;
     if (!building.isOperational) return;
+    if (building.state.kind === "researching") return;
+
+    // Queue cap: max 5 items total (active + queued)
+    const activeCount = building.state.kind === "producing" ? 1 : 0;
+    if (activeCount + building.productionQueue.length >= 5) return;
+
+    // Gate: require prerequisite building to be operational
+    const reqBuildingType = unitBuildingRequirements[unitTypeKey];
+    if (reqBuildingType) {
+      const hasReq = this.entities.buildingsByFaction(building.faction)
+        .some((b) => b.typeKey === reqBuildingType && b.isOperational);
+      if (!hasReq) return;
+    }
 
     const costs = building.faction === "wizards" ? wizardUnitCosts : robotUnitCosts;
     const cost = costs[unitTypeKey];
@@ -362,17 +416,324 @@ export class GameEngine {
 
     const pop = this._computePopulation();
     const { count, cap } = pop[building.faction];
-    if (cap > 0 && count >= cap) return;
+    // Count units already pending in all buildings' queues so we don't overshoot the cap
+    let pendingPop = 0;
+    for (const b of this.entities.buildingsByFaction(building.faction)) {
+      if (b.state.kind === "producing") pendingPop++;
+      pendingPop += b.productionQueue.length;
+    }
+    if (cap > 0 && count + pendingPop >= cap) return;
 
+    // Deduct resources at enqueue time
     res.wood -= cost.wood;
     res.water -= cost.water;
 
+    if (building.state.kind === "operational") {
+      building.state = {
+        kind: "producing",
+        unitTypeKey,
+        progressTicks: 0,
+        totalTicks: Math.round(cost.productionTimeSec * TICKS_PER_SEC),
+      };
+    } else {
+      // Already producing — enqueue
+      building.productionQueue.push(unitTypeKey);
+    }
+  }
+
+  issueCancelProduction(buildingId: string): void {
+    const entity = this.entities.get(buildingId);
+    if (!entity || entity.kind !== "building") return;
+    const building = entity as BuildingEntity;
+
+    const costs = building.faction === "wizards" ? wizardUnitCosts : robotUnitCosts;
+    const res = this.resources[building.faction];
+
+    if (building.state.kind === "producing") {
+      // Refund current item
+      const cost = costs[building.state.unitTypeKey];
+      if (cost) {
+        res.wood += cost.wood;
+        res.water += cost.water;
+      }
+      // Promote next queued item if any
+      if (building.productionQueue.length > 0) {
+        const next = building.productionQueue.shift()!;
+        const nextCost = costs[next];
+        building.state = {
+          kind: "producing",
+          unitTypeKey: next,
+          progressTicks: 0,
+          totalTicks: nextCost ? Math.round(nextCost.productionTimeSec * TICKS_PER_SEC) : 0,
+        };
+      } else {
+        building.state = { kind: "operational" };
+      }
+    } else if (building.productionQueue.length > 0) {
+      // Cancel the last queued item (most recently added)
+      const cancelled = building.productionQueue.pop()!;
+      const cost = costs[cancelled];
+      if (cost) {
+        res.wood += cost.wood;
+        res.water += cost.water;
+      }
+    }
+  }
+
+  issueResearchOrder(buildingId: string, researchKey: string): void {
+    const entity = this.entities.get(buildingId);
+    if (!entity || entity.kind !== "building") return;
+    const building = entity as BuildingEntity;
+    if (building.state.kind !== "operational") return;
+
+    const cost = researchCosts[researchKey as keyof typeof researchCosts];
+    if (!cost) return;
+
+    if (this._completedResearch.get(building.faction)?.has(researchKey)) return;
+
+    const res = this.resources[building.faction];
+    if (res.wood < cost.wood || res.water < cost.water) return;
+
+    res.wood -= cost.wood;
+    res.water -= cost.water;
     building.state = {
-      kind: "producing",
-      unitTypeKey,
+      kind: "researching",
+      researchKey,
       progressTicks: 0,
-      totalTicks: Math.round(cost.productionTimeSec * TICKS_PER_SEC),
+      totalTicks: Math.round(cost.durationSec * TICKS_PER_SEC),
     };
+  }
+
+  issueCancelResearchOrder(buildingId: string): void {
+    const entity = this.entities.get(buildingId);
+    if (!entity || entity.kind !== "building") return;
+    const building = entity as BuildingEntity;
+    if (building.state.kind !== "researching") return;
+
+    const cost = researchCosts[building.state.researchKey as keyof typeof researchCosts];
+    if (cost) {
+      this.resources[building.faction].wood += cost.wood;
+      this.resources[building.faction].water += cost.water;
+    }
+    building.state = { kind: "operational" };
+  }
+
+  issueAttachOrder(coreId: string, platformId: string): void {
+    const coreEntity = this.entities.get(coreId);
+    if (!coreEntity || coreEntity.kind !== "unit") return;
+    const core = coreEntity as UnitEntity;
+    if (core.typeKey !== "core" || core.faction !== "robots" || core.attachedPlatformTypeKey) return;
+
+    const platformEntity = this.entities.get(platformId);
+    if (!platformEntity || platformEntity.kind !== "unit") return;
+    const platform = platformEntity as UnitEntity;
+    if (!ROBOT_PLATFORM_TYPES.has(platform.typeKey) || platform.faction !== "robots" || platform.attachedCoreId !== null) return;
+
+    const start = { x: Math.round(core.position.x), y: Math.round(core.position.y) };
+    const goal = this._nearestAttachTile(platform.position, core.position);
+    if (!goal) return;
+    const path = findPath(this.grid, start, goal) ?? [];
+    core.state = { kind: "attachMove", platformId, path, yieldTicks: 0 };
+  }
+
+  issueDetachOrder(platformId: string): void {
+    const platformEntity = this.entities.get(platformId);
+    if (!platformEntity || platformEntity.kind !== "unit") return;
+    const platform = platformEntity as UnitEntity;
+    if (!platform.attachedCoreId) return;
+
+    const coreEntity = this.entities.get(platform.attachedCoreId);
+    if (!coreEntity || coreEntity.kind !== "unit") return;
+    const core = coreEntity as UnitEntity;
+
+    // Eject Core to an adjacent tile, never the platform's own tile
+    const px = Math.round(platform.position.x);
+    const py = Math.round(platform.position.y);
+    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
+    let ejectPos: Vec2 = platform.position;
+    for (const d of dirs) {
+      const tx = px + d.x;
+      const ty = py + d.y;
+      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, core.id)) {
+        ejectPos = { x: tx, y: ty };
+        break;
+      }
+    }
+
+    core.position = { ...ejectPos };
+    core.attachedPlatformId = null;
+    core.attachedPlatformTypeKey = null;
+    core.state = { kind: "idle" };
+
+    platform.attachedCoreId = null;
+    platform.state = { kind: "idle" }; // cancel any in-flight movement
+  }
+
+  issueBuildOrder(unitId: string, buildingTypeKey: string, topLeft: Vec2): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    if (!BUILDER_UNIT_TYPES.has(unit.typeKey)) return;
+
+    if (!this._isValidBuildSite(unit.faction, buildingTypeKey, topLeft)) return;
+
+    const costs = unit.faction === "wizards" ? wizardBuildingCosts : robotBuildingCosts;
+    const cost = costs[buildingTypeKey];
+    if (!cost) return;
+
+    const res = this.resources[unit.faction];
+    if (res.wood < cost.wood || res.water < cost.water) return;
+    res.wood -= cost.wood;
+    res.water -= cost.water;
+
+    const factionStats = unit.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const bStats = factionStats[buildingTypeKey];
+    if (!bStats) return;
+
+    const building = new BuildingEntity({
+      faction: unit.faction,
+      typeKey: buildingTypeKey,
+      position: topLeft,
+      stats: {
+        maxHp: bStats.hp,
+        damage: 0,
+        range: bStats.visionRange,
+        speed: 0,
+        charisma: 0,
+        armor: 0,
+        capacity: bStats.occupantCapacity,
+      },
+      constructionTicks: Math.round(cost.constructionTimeSec * TICKS_PER_SEC),
+    });
+    this.entities.add(building);
+    this._blockBuildingTiles(building);
+
+    const entry = this._nearestBuildingEntryPoint(building, unit.position);
+    if (!entry) { unit.state = { kind: "constructing", buildingId: building.id }; return; }
+
+    const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+    const path = findPath(this.grid, start, entry);
+    if (path && path.length > 0) {
+      unit.state = { kind: "buildMove", buildingId: building.id, path, yieldTicks: 0 };
+    } else {
+      unit.state = { kind: "constructing", buildingId: building.id };
+    }
+  }
+
+  private _isValidBuildSite(faction: Faction, buildingTypeKey: string, topLeft: Vec2): boolean {
+    const factionStats = faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const fp = factionStats[buildingTypeKey]?.footprintTiles ?? 1;
+    for (let dy = 0; dy < fp; dy++) {
+      for (let dx = 0; dx < fp; dx++) {
+        const tx = topLeft.x + dx;
+        const ty = topLeft.y + dy;
+        if (!this.grid.inBounds(tx, ty)) return false;
+        const tile = this.grid.getTile(tx, ty);
+        if (tile?.terrain === "water") return false;
+        if (this.grid.isBlocked(tx, ty)) return false;
+        // Prevent building on active resource deposits
+        const hasDeposit = this.deposits.some(
+          (d) => d.position.x === tx && d.position.y === ty && d.quantity > 0
+        );
+        if (hasDeposit) return false;
+      }
+    }
+    // Water-adjacent buildings must touch at least one water tile
+    if (buildingRequiresAdjacentWater.has(buildingTypeKey)) {
+      if (!this._isAdjacentToWater(topLeft, fp)) return false;
+    }
+    return true;
+  }
+
+  private _isAdjacentToWater(topLeft: Vec2, footprintTiles: number): boolean {
+    for (let dy = 0; dy < footprintTiles; dy++) {
+      for (let dx = 0; dx < footprintTiles; dx++) {
+        const tx = topLeft.x + dx;
+        const ty = topLeft.y + dy;
+        for (const nb of this.grid.neighbours4(tx, ty)) {
+          if (this.grid.getTile(nb.x, nb.y)?.terrain === "water") return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private _processConstruction(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind !== "constructing") continue;
+      const { buildingId } = unit.state;
+      const bEntity = this.entities.get(buildingId);
+      if (!bEntity || bEntity.kind !== "building") { unit.state = { kind: "idle" }; continue; }
+      const building = bEntity as BuildingEntity;
+      if (building.state.kind !== "underConstruction") { unit.state = { kind: "idle" }; continue; }
+      const done = building.advanceConstruction();
+      if (done) {
+        if (SINGLE_USE_BUILDERS.has(unit.typeKey)) {
+          // Eject any attached Core before removing the platform
+          if (unit.attachedCoreId) this.issueDetachOrder(unit.id);
+          this.entities.remove(unit.id);
+        } else {
+          unit.state = { kind: "idle" };
+        }
+      }
+    }
+  }
+
+  issueResumeConstructionOrder(unitId: string, buildingId: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    if (!BUILDER_UNIT_TYPES.has(unit.typeKey)) return;
+
+    const bEntity = this.entities.get(buildingId);
+    if (!bEntity || bEntity.kind !== "building") return;
+    const building = bEntity as BuildingEntity;
+    if (building.state.kind !== "underConstruction") return;
+    if (building.faction !== unit.faction) return;
+
+    const entry = this._nearestBuildingEntryPoint(building, unit.position);
+    if (!entry) { unit.state = { kind: "constructing", buildingId }; return; }
+
+    const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+    const path = findPath(this.grid, start, entry);
+    if (path && path.length > 0) {
+      unit.state = { kind: "buildMove", buildingId, path, yieldTicks: 0 };
+    } else {
+      unit.state = { kind: "constructing", buildingId };
+    }
+  }
+
+  issueDemolishOrder(buildingId: string): void {
+    const entity = this.entities.get(buildingId);
+    if (!entity || entity.kind !== "building") return;
+    const building = entity as BuildingEntity;
+
+    // No resource refund — spec: "Removing a building permanently destroys it with no resource refund."
+    // Release any builders working on this building
+    for (const unit of this.entities.unitsByFaction(building.faction)) {
+      if (
+        (unit.state.kind === "constructing" || unit.state.kind === "buildMove") &&
+        unit.state.buildingId === buildingId
+      ) {
+        unit.state = { kind: "idle" };
+      }
+    }
+
+    this._unblockBuildingTiles(building);
+    this.entities.remove(buildingId);
+  }
+
+  private _unblockBuildingTiles(building: BuildingEntity): void {
+    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
+    const bx = Math.floor(building.position.x);
+    const by = Math.floor(building.position.y);
+    for (let dy = 0; dy < fp; dy++) {
+      for (let dx = 0; dx < fp; dx++) {
+        this.grid.unblockTile(bx + dx, by + dy);
+      }
+    }
   }
 
   /** Give XP to a unit. Applies level-up bonus if threshold crossed. */
@@ -390,7 +751,7 @@ export class GameEngine {
   private _processMovement(): void {
     for (const unit of this.entities.units()) {
       const kind = unit.state.kind;
-      if (kind === "moving" || kind === "patrolling" || kind === "gatherMove" || kind === "dropoffMove") {
+      if (kind === "moving" || kind === "patrolling" || kind === "gatherMove" || kind === "dropoffMove" || kind === "buildMove" || kind === "attacking" || kind === "attachMove") {
         this._advanceUnit(unit, TICK_MS / 1000);
       }
     }
@@ -402,8 +763,12 @@ export class GameEngine {
       state.kind !== "moving" &&
       state.kind !== "patrolling" &&
       state.kind !== "gatherMove" &&
-      state.kind !== "dropoffMove"
+      state.kind !== "dropoffMove" &&
+      state.kind !== "buildMove" &&
+      state.kind !== "attacking" &&
+      state.kind !== "attachMove"
     ) return;
+    if (state.kind === "attacking" && state.path.length === 0) return;
 
     let remaining = unit.stats.speed * stepSecs;
 
@@ -474,9 +839,34 @@ export class GameEngine {
         this._doDropoff(unit);
         break;
 
+      case "buildMove":
+        unit.state = { kind: "constructing", buildingId: state.buildingId };
+        break;
+
+      case "attacking":
+        // Path exhausted — stay in attacking state; _processAttacks will fire immediately or replan
+        unit.state = { kind: "attacking", targetId: state.targetId, path: [], yieldTicks: 0 };
+        break;
+
       case "patrolling":
         this._replanPatrol(unit);
         break;
+
+      case "attachMove": {
+        const platform = this.entities.get(state.platformId) as UnitEntity | undefined;
+        if (!platform || !ROBOT_PLATFORM_TYPES.has(platform.typeKey) || platform.attachedCoreId) {
+          unit.state = { kind: "idle" };
+          break;
+        }
+        // Core becomes a hidden passenger inside the platform
+        unit.attachedPlatformId = platform.id;
+        unit.attachedPlatformTypeKey = platform.typeKey;
+        unit.position = { ...platform.position };
+        unit.state = { kind: "platformShell" };
+        // Platform is now the active combined unit — no stat changes needed
+        platform.attachedCoreId = unit.id;
+        break;
+      }
     }
   }
 
@@ -487,6 +877,7 @@ export class GameEngine {
     if (unit.carrying) {
       this.resources[unit.faction][unit.carrying.resource] += unit.carrying.amount;
       unit.carrying = null;
+      this.giveXp(unit.id, gatherXpPerTrip);
     }
 
     // Re-gather from same deposit if available and unoccupied
@@ -513,7 +904,10 @@ export class GameEngine {
       state.kind !== "moving" &&
       state.kind !== "patrolling" &&
       state.kind !== "gatherMove" &&
-      state.kind !== "dropoffMove"
+      state.kind !== "dropoffMove" &&
+      state.kind !== "buildMove" &&
+      state.kind !== "attacking" &&
+      state.kind !== "attachMove"
     ) return;
 
     let targetPosition: Vec2;
@@ -529,6 +923,24 @@ export class GameEngine {
       const entry = this._nearestBuildingEntryPoint(building as BuildingEntity, unit.position);
       if (!entry) { unit.state = { kind: "idle" }; return; }
       targetPosition = entry;
+    } else if (state.kind === "buildMove") {
+      const building = this.entities.get(state.buildingId);
+      if (!building || building.kind !== "building") { unit.state = { kind: "idle" }; return; }
+      const entry = this._nearestBuildingEntryPoint(building as BuildingEntity, unit.position);
+      if (!entry) { unit.state = { kind: "idle" }; return; }
+      targetPosition = entry;
+    } else if (state.kind === "attacking") {
+      const target = this.entities.get(state.targetId);
+      if (!target) { unit.state = { kind: "idle" }; return; }
+      const goal = this._nearestPassable({ x: Math.floor(target.position.x), y: Math.floor(target.position.y) });
+      if (!goal) { unit.state = { kind: "idle" }; return; }
+      targetPosition = goal;
+    } else if (state.kind === "attachMove") {
+      const platform = this.entities.get(state.platformId);
+      if (!platform) { unit.state = { kind: "idle" }; return; }
+      const goal = this._nearestAttachTile(platform.position, unit.position);
+      if (!goal) { unit.state = { kind: "idle" }; return; }
+      targetPosition = goal;
     } else {
       targetPosition = state.heading === "toB" ? state.pointB : state.pointA;
     }
@@ -581,9 +993,11 @@ export class GameEngine {
 
   // ── Gathering ─────────────────────────────────────────────────────────────────
 
-  private _processGathering(): void {
+  private _processGathering(tick: number): void {
     for (const unit of this.entities.units()) {
       if (unit.state.kind !== "gathering") continue;
+      // Only harvest every GATHER_INTERVAL_TICKS ticks to throttle collection speed
+      if (tick % GATHER_INTERVAL_TICKS !== 0) continue;
       const { depositId } = unit.state;
       const deposit = this.deposits.find((d) => d.id === depositId);
 
@@ -612,6 +1026,11 @@ export class GameEngine {
       deposit.quantity -= harvest;
       unit.carrying = { resource: deposit.kind, amount: carrying + harvest };
 
+      // Clear terrain when wood deposit exhausted (tile becomes open/passable)
+      if (deposit.quantity <= 0 && deposit.kind === "wood") {
+        this.grid.setTerrain(deposit.position.x, deposit.position.y, "open");
+      }
+
       // Full load or deposit just exhausted → head to dropoff
       if (unit.carrying.amount >= unit.stats.capacity || deposit.quantity <= 0) {
         this.depositOccupants.delete(depositId);
@@ -621,7 +1040,10 @@ export class GameEngine {
   }
 
   private _sendToDropoff(unit: UnitEntity, depositId: string): void {
-    const buildings = this.entities.buildingsByFaction(unit.faction).filter((b) => b.isOperational);
+    const resource = unit.carrying?.resource ?? "wood";
+    const validDropoffTypes = resourceDropoffBuildings[resource];
+    const buildings = this.entities.buildingsByFaction(unit.faction)
+      .filter((b) => b.isOperational && validDropoffTypes.includes(b.typeKey));
     if (buildings.length === 0) { unit.state = { kind: "idle" }; return; }
 
     // Find nearest building, measured to its closest entry point from the unit
@@ -710,12 +1132,25 @@ export class GameEngine {
   // ── Production ────────────────────────────────────────────────────────────────
 
   private _processProduction(): void {
+    const costs = { wizards: wizardUnitCosts, robots: robotUnitCosts };
     for (const building of this.entities.buildings()) {
       if (building.state.kind !== "producing") continue;
       building.state.progressTicks++;
       if (building.state.progressTicks >= building.state.totalTicks) {
         const { unitTypeKey } = building.state;
-        building.state = { kind: "operational" };
+        // Dequeue next item before spawning so state is consistent
+        if (building.productionQueue.length > 0) {
+          const next = building.productionQueue.shift()!;
+          const nextCost = costs[building.faction][next];
+          building.state = {
+            kind: "producing",
+            unitTypeKey: next,
+            progressTicks: 0,
+            totalTicks: nextCost ? Math.round(nextCost.productionTimeSec * TICKS_PER_SEC) : 0,
+          };
+        } else {
+          building.state = { kind: "operational" };
+        }
         this._spawnProducedUnit(building, unitTypeKey);
       }
     }
@@ -729,7 +1164,18 @@ export class GameEngine {
       if (ws) stats = { maxHp: ws.hp, damage: ws.damage, range: ws.range, speed: ws.speed, charisma: ws.charisma, armor: ws.armor, capacity: ws.capacity };
     } else {
       const rs = robotUnitStats[unitTypeKey];
-      if (rs) stats = { maxHp: rs.hpWood, damage: rs.damage, range: rs.range, speed: rs.speed, charisma: rs.charisma, armor: rs.armorWood, capacity: rs.capacity };
+      if (rs) {
+        const metalUnlocked = this._completedResearch.get("robots")?.has("woodToMetal") ?? false;
+        stats = {
+          maxHp: metalUnlocked ? rs.hpMetal : rs.hpWood,
+          damage: rs.damage,
+          range: rs.range,
+          speed: rs.speed,
+          charisma: rs.charisma,
+          armor: metalUnlocked ? rs.armorMetal : rs.armorWood,
+          capacity: rs.capacity,
+        };
+      }
     }
 
     if (!stats) return;
@@ -737,14 +1183,17 @@ export class GameEngine {
     const spawnPos = this._findSpawnTile(building);
     if (!spawnPos) return;
 
-    this.entities.add(
-      new UnitEntity({
-        faction: building.faction,
-        typeKey: unitTypeKey,
-        position: spawnPos,
-        stats,
-      }),
-    );
+    const unit = new UnitEntity({
+      faction: building.faction,
+      typeKey: unitTypeKey,
+      position: spawnPos,
+      stats,
+    });
+    if (building.faction === "robots") {
+      const metalUnlocked = this._completedResearch.get("robots")?.has("woodToMetal") ?? false;
+      unit.materialType = metalUnlocked ? "metal" : "wood";
+    }
+    this.entities.add(unit);
   }
 
   private _findSpawnTile(building: BuildingEntity): Vec2 | null {
@@ -771,20 +1220,139 @@ export class GameEngine {
     return null;
   }
 
+  private _processResearch(): void {
+    for (const building of this.entities.buildings()) {
+      if (building.state.kind !== "researching") continue;
+      const { researchKey, faction } = { researchKey: building.state.researchKey, faction: building.faction };
+      const done = building.advanceResearch();
+      if (done) {
+        this._completedResearch.get(faction)?.add(researchKey);
+        this.onAlert?.(`Research complete: ${researchKey}`);
+      }
+    }
+  }
+
+  // ── Combat ───────────────────────────────────────────────────────────────────
+
+  private _processAttacks(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind !== "attacking") continue;
+      const state = unit.state;
+
+      if (unit.attackCooldownTicks > 0) unit.attackCooldownTicks--;
+
+      const target = this.entities.get(state.targetId);
+      if (!target) { unit.state = { kind: "idle" }; continue; }
+
+      const dx = target.position.x - unit.position.x;
+      const dy = target.position.y - unit.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > unit.stats.range) {
+        // Not in range — compute chase path if not already chasing
+        if (state.path.length === 0) {
+          const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+          const goal = this._nearestPassable({ x: Math.floor(target.position.x), y: Math.floor(target.position.y) });
+          const path = goal ? findPath(this.grid, start, goal) : null;
+          state.path = path ?? [];
+          state.yieldTicks = 0;
+        }
+        continue;
+      }
+
+      // In range — stop chasing and attack if cooldown allows
+      state.path = [];
+      if (unit.attackCooldownTicks > 0) continue;
+
+      const dmg = Math.max(0, unit.stats.damage - target.stats.armor);
+      target.stats.hp -= dmg;
+
+      const statConfig = unit.faction === "wizards"
+        ? wizardUnitStats[unit.typeKey]
+        : robotUnitStats[unit.typeKey];
+      unit.attackCooldownTicks = Math.round((statConfig?.attackIntervalSec ?? 1.0) * TICKS_PER_SEC);
+
+      if (target.stats.hp <= 0) {
+        this._handleEntityDeath(target, unit.id);
+      }
+    }
+  }
+
+  private _processAutoAggro(tick: number): void {
+    if (tick % 10 !== 0) return;
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind !== "idle") continue;
+      if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) continue; // unattached platforms don't auto-aggro
+      for (const entity of this.entities.all()) {
+        if (entity.faction === unit.faction) continue;
+        if (entity.kind === "unit" && (entity as UnitEntity).state.kind === "platformShell") continue;
+        const dx = entity.position.x - unit.position.x;
+        const dy = entity.position.y - unit.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= unit.stats.range) {
+          unit.state = { kind: "attacking", targetId: entity.id, path: [], yieldTicks: 0 };
+          break;
+        }
+      }
+    }
+  }
+
+  private _handleEntityDeath(entity: Entity, killerId?: string): void {
+    if (entity.kind === "unit") {
+      const unit = this.entities.get(entity.id) as UnitEntity | undefined;
+      if (unit) this._releaseDepositOccupancy(unit);
+      if (killerId) this.giveXp(killerId, xpRates.killEnemy);
+      this.entities.remove(entity.id);
+      this.onAlert?.(`${entity.typeKey} destroyed`);
+      if (entity.isNamed) {
+        // Determine killer's faction for victory credit
+        const killer = killerId ? this.entities.get(killerId) : null;
+        const winFaction: Faction = killer ? killer.faction : (entity.faction === "wizards" ? "robots" : "wizards");
+        this.events.queue("VictoryAlert", { faction: winFaction, condition: "military", pct: 100 });
+      }
+    } else if (entity.kind === "building") {
+      const building = this.entities.get(entity.id) as BuildingEntity | undefined;
+      if (building) this._unblockBuildingTiles(building);
+      this.entities.remove(entity.id);
+      this.onAlert?.(`${entity.typeKey} destroyed`);
+    }
+  }
+
   // ── Auto-collection ───────────────────────────────────────────────────────────
 
-  private _processAutoCollection(): void {
+  private _processAutoCollection(tick: number): void {
+    if (tick % AUTO_COLLECTION_INTERVAL_TICKS !== 0) return;
     for (const building of this.entities.buildings()) {
       if (!building.isOperational) continue;
       if (building.typeKey === "waterExtractor") {
-        this.resources[building.faction].water += autoCollectionRates.waterExtractorPerTick;
+        this.resources[building.faction].water += autoCollectionRates.waterExtractorPerInterval;
       } else if (building.typeKey === "watermill") {
-        this.resources[building.faction].water += autoCollectionRates.watermillPerTick;
+        this.resources[building.faction].water += autoCollectionRates.watermillPerInterval;
       }
     }
   }
 
   // ── Utility ───────────────────────────────────────────────────────────────────
+
+  /** Nearest passable tile adjacent to platformPos, preferring the tile closest to fromPos. */
+  private _nearestAttachTile(platformPos: Vec2, fromPos: Vec2): Vec2 | null {
+    const px = Math.round(platformPos.x);
+    const py = Math.round(platformPos.y);
+    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
+    let best: Vec2 | null = null;
+    let bestDist = Infinity;
+    for (const d of dirs) {
+      const tx = px + d.x;
+      const ty = py + d.y;
+      if (!this.grid.isPassable(tx, ty)) continue;
+      const dx = tx - fromPos.x;
+      const dy = ty - fromPos.y;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) { bestDist = dist; best = { x: tx, y: ty }; }
+    }
+    return best;
+  }
 
   private _nearestPassable(goal: Vec2): Vec2 | null {
     if (this.grid.isPassable(goal.x, goal.y)) return goal;
@@ -833,6 +1401,7 @@ export class GameEngine {
   private _tileOccupiedByUnit(x: number, y: number, excludeId: string): boolean {
     for (const u of this.entities.units()) {
       if (u.id === excludeId) continue;
+      if (u.state.kind === "platformShell") continue; // passengers don't occupy tiles
       if (Math.round(u.position.x) === x && Math.round(u.position.y) === y) return true;
     }
     return false;
@@ -849,7 +1418,11 @@ export class GameEngine {
       wizards: { count: 0, cap: 0 },
       robots: { count: 0, cap: 0 },
     };
-    for (const unit of this.entities.units()) result[unit.faction].count++;
+    for (const unit of this.entities.units()) {
+      if (ROBOT_PLATFORM_TYPES.has(unit.typeKey)) continue; // platforms don't consume population
+      result[unit.faction].count++;
+      result[unit.faction].cap += unitPopulationBonus[unit.typeKey] ?? 0;
+    }
     for (const building of this.entities.buildings()) {
       if (!building.isOperational) continue;
       const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
@@ -865,13 +1438,26 @@ export class GameEngine {
       .map((d) => ({ id: d.id, kind: d.kind, position: d.position, quantity: d.quantity }));
   }
 
+  private _syncPassengerPositions(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind !== "platformShell" || !unit.attachedPlatformId) continue;
+      const platform = this.entities.get(unit.attachedPlatformId) as UnitEntity | undefined;
+      if (platform) unit.position = { ...platform.position };
+    }
+  }
+
   // ── Fog ───────────────────────────────────────────────────────────────────────
 
   private tick(tick: number, elapsedMs: number): void {
+    this._syncPassengerPositions();
     this._processMovement();
-    this._processGathering();
+    this._processConstruction();
+    this._processGathering(tick);
     this._processProduction();
-    this._processAutoCollection();
+    this._processResearch();
+    this._processAttacks();
+    this._processAutoAggro(tick);
+    this._processAutoCollection(tick);
     this._updateFog(tick);
     this.events.flushDeferred();
 
@@ -890,6 +1476,10 @@ export class GameEngine {
       },
       population: this._computePopulation(),
       deposits: this._buildDepositSnapshots(),
+      completedResearch: {
+        wizards: [...(this._completedResearch.get("wizards") ?? [])],
+        robots:  [...(this._completedResearch.get("robots")  ?? [])],
+      },
     });
   }
 
@@ -906,9 +1496,13 @@ export class GameEngine {
     const sources: { position: { x: number; y: number }; rangeTiles: number; concealed?: boolean }[] = [];
 
     for (const unit of this.entities.unitsByFaction(faction)) {
+      if (unit.state.kind === "platformShell") continue; // passengers provide no vision
+      const isUnattachedPlatform = ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId;
       sources.push({
         position: unit.position,
-        rangeTiles: unit.stats.range,
+        rangeTiles: isUnattachedPlatform
+          ? UNATTACHED_PLATFORM_VISION_TILES
+          : Math.max(unit.stats.range, UNIT_VISION_TILES),
         concealed: unit.concealed,
       });
     }

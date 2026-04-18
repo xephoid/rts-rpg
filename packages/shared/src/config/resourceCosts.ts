@@ -5,10 +5,17 @@
 export const TICKS_PER_SEC = 60;
 
 export const gatherRates = {
-  // Initial guess: fills a 20-capacity unit in ~10 ticks at the deposit.
+  // Initial guess: fills a 20-capacity unit in ~40 ticks (GATHER_INTERVAL_TICKS=4 means
+  // one harvest per 4 ticks, so 20 capacity / 2 per-harvest = 10 harvests * 4 ticks = 40 ticks).
   woodPerTick: 2,
   waterPerTick: 2,
 };
+
+/** Ticks between each harvest action. Higher = slower gathering. 4 = 1/4 of single-tick speed. */
+export const GATHER_INTERVAL_TICKS = 4;
+
+/** XP awarded to a gatherer on each successful resource delivery. Initial guess. */
+export const gatherXpPerTrip = 5;
 
 export type UnitCost = {
   wood: number;
@@ -127,12 +134,17 @@ export const waterDeposit = {
   regenerates: false,
 };
 
-// ── Auto-collection rates (per tick) ─────────────────────────────────────────
+// ── Auto-collection rates ─────────────────────────────────────────────────────
+
+/**
+ * Auto-collection fires once every this many ticks (= once per second at TICKS_PER_SEC=60).
+ * Values below are per-collection-event, not per-tick.
+ */
+export const AUTO_COLLECTION_INTERVAL_TICKS = 60; // Initial guess: 1 collection per second
 
 export const autoCollectionRates = {
-  // Initial guess: 1 tick = 1 second
-  waterExtractorPerTick: 2, // Initial guess
-  watermillPerTick: 2, // Initial guess
+  waterExtractorPerInterval: 1, // Initial guess: 1 water per second
+  watermillPerInterval: 1,       // Initial guess: 1 water per second
 };
 
 // ── Resource alert thresholds ─────────────────────────────────────────────────

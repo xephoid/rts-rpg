@@ -36,6 +36,31 @@
   overflow: hidden;
 }
 
+.entityHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.entityPortrait {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  object-fit: contain;
+  image-rendering: pixelated;
+  border: 1px solid #374151;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.entityTitleBlock {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .entityName {
   font-family: var(--font-header);
   font-size: 14px;
@@ -140,14 +165,25 @@
 
 .groupRow {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 6px;
   padding: 3px 6px;
   background: rgba(255, 255, 255, 0.04);
   border-radius: 3px;
 }
 
+.groupPortrait {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  object-fit: contain;
+  image-rendering: pixelated;
+  border: 1px solid #374151;
+  border-radius: 2px;
+}
+
 .groupName {
+  flex: 1;
   font-size: 12px;
   color: #e5e7eb;
   text-transform: capitalize;
@@ -168,6 +204,31 @@
 }
 
 .productionRow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prodHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prodActiveIcon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  object-fit: contain;
+  image-rendering: pixelated;
+  border: 1px solid #374151;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.prodLabelBlock {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -220,4 +281,28 @@
   font-size: 12px;
   color: #d1fae5;
   text-transform: capitalize;
+}
+
+.queueRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.queueLabel {
+  font-size: 10px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+}
+
+.queueIcon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  border: 1px solid #374151;
+  border-radius: 2px;
 }

@@ -5,11 +5,14 @@ import type { StatBlockInit } from "./StatBlock.js";
 export type BuildingState =
   | { kind: "underConstruction"; progressTicks: number; totalTicks: number }
   | { kind: "operational" }
-  | { kind: "producing"; unitTypeKey: string; progressTicks: number; totalTicks: number };
+  | { kind: "producing"; unitTypeKey: string; progressTicks: number; totalTicks: number }
+  | { kind: "researching"; researchKey: string; progressTicks: number; totalTicks: number };
 
 export class BuildingEntity extends Entity {
   state: BuildingState;
   readonly occupantIds: Set<string> = new Set();
+  /** Queued unit typeKeys — processed FIFO after active production completes. Max 5 total items (active + queue). */
+  readonly productionQueue: string[] = [];
 
   constructor(params: {
     id?: string;
@@ -28,8 +31,7 @@ export class BuildingEntity extends Entity {
   }
 
   get isOperational(): boolean {
-    // "producing" is still operational as a structure — units can still drop off resources.
-    return this.state.kind === "operational" || this.state.kind === "producing";
+    return this.state.kind !== "underConstruction";
   }
 
   override toSnapshot() {
@@ -44,11 +46,40 @@ export class BuildingEntity extends Entity {
               totalTicks: this.state.totalTicks,
             }
           : null,
+      productionQueue: [...this.productionQueue],
+      buildingState: (
+        this.state.kind === "underConstruction" ? "underConstruction"
+        : this.state.kind === "producing" ? "producing"
+        : this.state.kind === "researching" ? "researching"
+        : "operational"
+      ) as "underConstruction" | "operational" | "producing" | "researching",
+      constructionProgress:
+        this.state.kind === "underConstruction"
+          ? { progressTicks: this.state.progressTicks, totalTicks: this.state.totalTicks }
+          : null,
+      researchProgress:
+        this.state.kind === "researching"
+          ? {
+              researchKey: this.state.researchKey,
+              progressTicks: this.state.progressTicks,
+              totalTicks: this.state.totalTicks,
+            }
+          : null,
     };
   }
 
   advanceConstruction(): boolean {
     if (this.state.kind !== "underConstruction") return false;
+    this.state.progressTicks++;
+    if (this.state.progressTicks >= this.state.totalTicks) {
+      this.state = { kind: "operational" };
+      return true;
+    }
+    return false;
+  }
+
+  advanceResearch(): boolean {
+    if (this.state.kind !== "researching") return false;
     this.state.progressTicks++;
     if (this.state.progressTicks >= this.state.totalTicks) {
       this.state = { kind: "operational" };

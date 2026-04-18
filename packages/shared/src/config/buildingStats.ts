@@ -1,21 +1,104 @@
 // Building stats for all building types.
 // Values marked "Initial guess" — update to "Confirmed" after playtesting sign-off.
 
+/**
+ * Resolve a unit portrait (icon) path for use in selection panels.
+ * Lives here (not renderer/assets.ts) so /ui components can import it without
+ * violating ESLint import boundary rules.
+ * Robot icons are not fully populated yet — callers should handle missing images gracefully.
+ */
+export function unitPortraitPath(faction: "wizards" | "robots", typeKey: string): string {
+  return faction === "wizards"
+    ? `/wizard/icons/${typeKey}.png`
+    : `/robot/icons/${typeKey}.png`;
+}
+
+/**
+ * Resolve a unit sprite path for use in production buttons.
+ * These are the in-game unit images (side/isometric view sprites).
+ */
+export function unitSpritePath(faction: "wizards" | "robots", typeKey: string): string {
+  return faction === "wizards"
+    ? `/wizard/units/${typeKey}.png`
+    : `/robot/units/${typeKey}.png`;
+}
+
 /** Maps building typeKey → list of unit typeKeys it can produce. */
 export const buildingProduction: Record<string, string[]> = {
-  // Robot buildings
-  home:                  ["core"],
-  rechargeStation:       ["waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform", "probePlatform"],
-  combatFrameProduction: ["spinnerPlatform", "spitterPlatform", "largeCombatPlatform", "infiltrationPlatform", "wallPlatform"],
-  // Wizard buildings
-  castle:                ["subject", "surf"],
-  libraryOfEvocation:    ["evoker"],
-  libraryOfIllusion:     ["illusionist"],
-  libraryOfEnchantment:  ["enchantress"],
-  dragonHoard:           ["dragon"],
-  temple:                ["cleric"],
-  embassy:               ["archmage"],
+  // Robot buildings — each research building IS the production building for its unit type
+  home:                      ["core", "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform"],
+  combatFrameProduction:     ["spinnerPlatform", "spitterPlatform"],
+  combatResearchStation:     ["largeCombatPlatform"],
+  diplomaticResearchStation: ["infiltrationPlatform", "probePlatform"],
+  defensiveResearchStation:  ["wallPlatform"],
+  // Wizard buildings — all units produced at castle; libraries/special buildings are existence-only unlocks
+  castle:                    ["subject", "surf", "evoker", "illusionist", "enchantress", "dragon", "cleric"],
 };
+
+/** Unit types that can be ordered to construct a building. */
+export const BUILDER_UNIT_TYPES = new Set(["surf", "movableBuildKitPlatform"]);
+
+/** Builder is removed from map when construction completes (single-use). */
+export const SINGLE_USE_BUILDERS = new Set(["movableBuildKitPlatform"]);
+
+/**
+ * Which buildings can accept resources for each resource type.
+ * Gatherers only drop off at buildings in this list for the relevant resource.
+ */
+export const resourceDropoffBuildings: Record<"wood" | "water", string[]> = {
+  wood:  ["castle", "home", "logCabin", "woodStorage"],
+  water: ["castle", "home"],
+};
+
+/** Buildings that must be placed with at least one footprint tile adjacent to a water tile. */
+export const buildingRequiresAdjacentWater = new Set(["watermill", "waterExtractor"]);
+
+/**
+ * Building typeKey that must be operational before this unit can be produced.
+ * Units not listed are always available at their production building.
+ */
+/**
+ * Building typeKey that must be operational before this unit can be produced.
+ * Only wizard units need this — robot advanced units are produced AT their own research
+ * buildings, so no separate unlock check is needed.
+ */
+export const unitBuildingRequirements: Record<string, string> = {
+  illusionist: "libraryOfIllusion",
+  enchantress: "libraryOfEnchantment",
+  dragon:      "dragonHoard",
+  cleric:      "temple",
+};
+
+/** Maps building typeKey → list of researchable item keys available at that building. */
+export const buildingResearch: Record<string, string[]> = {
+  home:                 ["woodToMetal"],
+  libraryOfEvocation:   ["iceBlast", "fieryExplosion", "manaShield"],
+  libraryOfIllusion:    ["phantomDecoy", "mindFog"],
+  libraryOfEnchantment: ["strengthenAlly", "weakenFoe"],
+};
+
+/** Buildings a builder can construct. Includes additional main bases (spec: no limit on Castles/Homes). */
+export const factionBuildableBuildings: Record<"wizards" | "robots", string[]> = {
+  wizards: [
+    "castle",
+    "cottage", "wall", "wizardTower", "watermill", "logCabin", "manaReservoir",
+    "libraryOfEvocation", "libraryOfIllusion", "libraryOfEnchantment",
+    "dragonHoard", "temple", "embassy", "amphitheatre",
+  ],
+  robots: [
+    "home",
+    "rechargeStation", "immobileCombatPlatform", "waterExtractor", "woodStorage",
+    "combatFrameProduction", "combatResearchStation", "diplomaticResearchStation",
+    "defensiveResearchStation", "thirdSpace",
+  ],
+};
+
+/** Portrait path for buildings — for Build panel buttons and selection panel. */
+export function buildingPortraitPath(faction: "wizards" | "robots", typeKey: string): string {
+  return faction === "wizards"
+    ? `/wizard/buildings/${typeKey}.png`
+    : `/robot/buildings/${typeKey}.png`;
+}
 
 export type BuildingStatBlock = {
   hp: number;
@@ -40,10 +123,10 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
   rechargeStation: {
     // Initial guess: healing/recharge facility.
     hp: 200,
-    occupantCapacity: 2,
+    occupantCapacity: 8,
     visionRange: 3,
     footprintTiles: 2,
-    populationSupport: 4, // Initial guess: barracks-equivalent.
+    populationSupport: 8, // Confirmed: spec says +8 per Recharge Station.
   },
   immobileCombatPlatform: {
     // Initial guess: defensive tower — high HP, long vision.
@@ -120,15 +203,15 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 8,
     visionRange: 7,
     footprintTiles: 4,
-    populationSupport: 10, // Initial guess: capital supports 10 units.
+    populationSupport: 8, // Confirmed: capital supports 8 units.
   },
   cottage: {
     // Initial guess: basic housing.
     hp: 120,
-    occupantCapacity: 3,
+    occupantCapacity: 5,
     visionRange: 2,
     footprintTiles: 2,
-    populationSupport: 4, // Initial guess: small house adds 4 population.
+    populationSupport: 5, // Confirmed: spec says +5 per Cottage.
   },
   wall: {
     // Initial guess: defensive structure — very high HP, no occupants.

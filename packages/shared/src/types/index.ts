@@ -43,8 +43,24 @@ export type EntitySnapshot = {
     progressTicks: number;
     totalTicks: number;
   } | null;
+  /** Queued unit typeKeys waiting to be produced after the active item. */
+  productionQueue?: string[];
+  /** Only set on buildings. Explicit state for UI rendering. */
+  buildingState?: "underConstruction" | "operational" | "producing" | "researching";
+  /** Set on buildings under construction. */
+  constructionProgress?: { progressTicks: number; totalTicks: number } | null;
+  /** Set on buildings currently researching. */
+  researchProgress?: { researchKey: string; progressTicks: number; totalTicks: number } | null;
   /** Only set on units currently carrying a gathered resource. */
   carrying?: { resource: "wood" | "water"; amount: number } | null;
+  /** Only set on robot Core units — the typeKey of the platform it is riding inside. */
+  attachedPlatformTypeKey?: string | null;
+  /** Set on a robot platform entity when a Core is riding inside it. */
+  attachedCoreId?: string | null;
+  /** Only set on robot units — material the unit was constructed from. */
+  materialType?: "wood" | "metal" | null;
+  /** True while this unit is a hidden passenger (Core inside platform). */
+  isShell?: boolean;
 };
 
 export type TileSnapshot = {
@@ -75,4 +91,6 @@ export type GameStateSnapshot = {
   population: Record<Faction, { count: number; cap: number }>;
   /** All non-exhausted resource deposits (fog-filtered by renderer). */
   deposits: DepositSnapshot[];
+  /** Research items permanently unlocked per faction. */
+  completedResearch: Record<Faction, string[]>;
 };

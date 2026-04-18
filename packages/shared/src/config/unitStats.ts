@@ -11,6 +11,7 @@ export type UnitStatBlock = {
   armorWood: number;
   armorMetal: number;
   capacity: number; // resource carry capacity
+  attackIntervalSec: number; // seconds between attacks
 };
 
 export type WizardStatBlock = {
@@ -21,6 +22,7 @@ export type WizardStatBlock = {
   charisma: number;
   armor: number;
   capacity: number;
+  attackIntervalSec: number; // seconds between attacks
 };
 
 // ── Robot units ──────────────────────────────────────────────────────────────
@@ -37,6 +39,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 2,
     armorMetal: 6,
     capacity: 20,
+    attackIntervalSec: 2.0, // Initial guess
   },
   waterCollectionPlatform: {
     // Initial guess: slow worker — high capacity, low combat.
@@ -49,6 +52,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 3,
     armorMetal: 8,
     capacity: 40,
+    attackIntervalSec: 2.0, // Initial guess
   },
   woodChopperPlatform: {
     // Initial guess: melee worker — moderate HP, good close combat.
@@ -61,6 +65,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 4,
     armorMetal: 10,
     capacity: 30,
+    attackIntervalSec: 1.5, // Initial guess
   },
   movableBuildKitPlatform: {
     // Initial guess: construction unit — slow, high HP, no real combat.
@@ -73,6 +78,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 5,
     armorMetal: 12,
     capacity: 50,
+    attackIntervalSec: 2.5, // Initial guess
   },
   spinnerPlatform: {
     // Initial guess: light ranged — fast, moderate damage, dies quickly.
@@ -85,6 +91,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 2,
     armorMetal: 5,
     capacity: 10,
+    attackIntervalSec: 0.8, // Initial guess: fast attacker
   },
   spitterPlatform: {
     // Initial guess: medium ranged — bread-and-butter combat unit.
@@ -97,6 +104,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 3,
     armorMetal: 8,
     capacity: 10,
+    attackIntervalSec: 1.2, // Initial guess
   },
   infiltrationPlatform: {
     // Initial guess: stealth/scout — lowest HP, highest speed, surprise damage.
@@ -109,6 +117,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 1,
     armorMetal: 3,
     capacity: 15,
+    attackIntervalSec: 0.8, // Initial guess: burst attacker
   },
   largeCombatPlatform: {
     // Initial guess: heavy bruiser — 3x cost, very high HP and damage.
@@ -121,6 +130,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 10,
     armorMetal: 20,
     capacity: 5,
+    attackIntervalSec: 2.0, // Initial guess: slow heavy hitter
   },
   probePlatform: {
     // Initial guess: fast scout — vision range bonus applied in game logic.
@@ -133,6 +143,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 1,
     armorMetal: 2,
     capacity: 10,
+    attackIntervalSec: 2.0, // Initial guess
   },
   wallPlatform: {
     // Initial guess: defensive unit — stationary, high armor, no mobility.
@@ -145,6 +156,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     armorWood: 15,
     armorMetal: 30,
     capacity: 0,
+    attackIntervalSec: 2.5, // Initial guess
   },
 };
 
@@ -160,6 +172,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 15,
     armor: 8,
     capacity: 20,
+    attackIntervalSec: 0.8, // Initial guess: hero — rapid fire
   },
   surf: {
     // Initial guess: mobile skirmisher — fast, moderate stats.
@@ -170,6 +183,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 5,
     armor: 4,
     capacity: 15,
+    attackIntervalSec: 1.0, // Initial guess
   },
   subject: {
     // Initial guess: basic civilian wizard — low combat, high charisma.
@@ -180,6 +194,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 8,
     armor: 2,
     capacity: 20,
+    attackIntervalSec: 2.5, // Initial guess: civilian, slow attacker
   },
   evoker: {
     // Initial guess: combat mage — high damage, fragile. Needs mana.
@@ -190,6 +205,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 3,
     armor: 3,
     capacity: 10,
+    attackIntervalSec: 1.5, // Initial guess: deliberate casting
   },
   illusionist: {
     // Initial guess: utility/support — low direct damage, abilities matter.
@@ -200,6 +216,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 6,
     armor: 2,
     capacity: 10,
+    attackIntervalSec: 2.0, // Initial guess
   },
   dragon: {
     // Initial guess: apex unit — extremely powerful, very expensive.
@@ -210,6 +227,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 2,
     armor: 20,
     capacity: 0,
+    attackIntervalSec: 2.0, // Initial guess: slow powerful breath
   },
   enchantress: {
     // Initial guess: buff/debuff specialist — low direct damage.
@@ -220,6 +238,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 8,
     armor: 3,
     capacity: 15,
+    attackIntervalSec: 3.0, // Initial guess: support focus
   },
   cleric: {
     // Initial guess: healer/support — no damage, high charisma.
@@ -230,6 +249,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     charisma: 10,
     armor: 4,
     capacity: 20,
+    attackIntervalSec: 3.0, // Initial guess: rarely attacks
   },
 };
 
@@ -286,6 +306,14 @@ export const namedLeaders = {
   wizards: { typeKey: "archmage" as const, name: "Archmage Elara" },
   robots:  { typeKey: "core"     as const, name: "Motherboard" },
 } as const;
+
+/**
+ * Extra population cap contributed by a unit being alive on the map.
+ * Only named leaders or special units need entries here.
+ */
+export const unitPopulationBonus: Record<string, number> = {
+  archmage: 2, // Confirmed: wizard leader adds 2 population slots
+};
 
 // ── XP rates ─────────────────────────────────────────────────────────────────
 

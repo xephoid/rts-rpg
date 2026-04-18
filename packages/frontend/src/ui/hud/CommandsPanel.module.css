@@ -37,6 +37,7 @@
 }
 
 .cmdBtn {
+  position: relative;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
@@ -46,9 +47,11 @@
   cursor: pointer;
   padding: 6px 4px;
   transition: background 0.1s, color 0.1s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .cmdBtn:hover {
@@ -72,4 +75,90 @@
   font-size: 9px;
   color: #6b7280;
   margin-top: 2px;
+}
+
+.prodIcon {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  margin-bottom: 2px;
+}
+
+.prodLabel {
+  font-size: 11px;
+  color: #e5e7eb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.cost {
+  display: block;
+  font-size: 9px;
+  color: #6b7280;
+  margin-top: 1px;
+}
+
+.queueBadge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  background: #f59e0b;
+  color: #000;
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 8px;
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 14px;
+  pointer-events: none;
+}
+
+.lockBadge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  font-size: 10px;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.cmdBtnLocked {
+  opacity: 0.5;
+  border-color: rgba(255, 255, 255, 0.04);
+}
+
+.cmdBtnBuild {
+  background: rgba(124, 58, 237, 0.18);
+  border-color: rgba(124, 58, 237, 0.5);
+  color: #c4b5fd;
+}
+
+.cmdBtnBuild:hover {
+  background: rgba(124, 58, 237, 0.28);
+  color: #ddd6fe;
+}
+
+.cmdBtnDone {
+  opacity: 0.55;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.doneBadge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  background: #34d399;
+  color: #000;
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 8px;
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 14px;
+  pointer-events: none;
 }
