@@ -46,6 +46,12 @@ const REPLAN_THRESHOLD = 10;
  * TODO(capabilities): make this data-driven once a unit capability system exists.
  */
 const GATHERER_TYPES = new Set(["archmage", "surf", "core", "subject"]);
+/**
+ * Max tile radius a gatherer will search for the next deposit after exhausting one.
+ * Initial guess: ~20 tiles (~1/3 of small map width). Adjust after playtesting.
+ * TODO: ideally driven by unit vision range from FogOfWar once that API is stable.
+ */
+const GATHER_SEARCH_RADIUS = 20;
 
 export class GameEngine {
   readonly entities: EntityManager;
@@ -451,7 +457,7 @@ export class GameEngine {
         if (existing && existing !== unit.id) {
           // Deposit occupied — redirect to nearest free same-kind deposit
           const deposit = this.deposits.find((d) => d.id === depositId);
-          const alt = deposit ? this._findNearestUnoccupiedDeposit(deposit.kind, unit.position) : null;
+          const alt = deposit ? this._findNearestUnoccupiedDeposit(deposit.kind, unit.position, GATHER_SEARCH_RADIUS) : null;
           if (alt) {
             this.issueGatherOrder(unit.id, alt.id);
           } else {
@@ -488,12 +494,16 @@ export class GameEngine {
     if (deposit && deposit.quantity > 0 && !this.depositOccupants.has(depositId)) {
       this.issueGatherOrder(unit.id, depositId);
     } else if (deposit && deposit.quantity > 0) {
-      // Deposit occupied — find another of same kind
-      const alt = this._findNearestUnoccupiedDeposit(deposit.kind, unit.position);
+      // Deposit occupied — find nearest unoccupied same-kind within search radius
+      const alt = this._findNearestUnoccupiedDeposit(deposit.kind, unit.position, GATHER_SEARCH_RADIUS);
       if (alt) this.issueGatherOrder(unit.id, alt.id);
       else unit.state = { kind: "idle" };
     } else {
-      unit.state = { kind: "idle" };
+      // Original deposit exhausted — find nearest same-kind within search radius
+      const kind = deposit?.kind ?? unit.state.resource;
+      const alt = this._findNearestUnoccupiedDeposit(kind, unit.position, GATHER_SEARCH_RADIUS);
+      if (alt) this.issueGatherOrder(unit.id, alt.id);
+      else unit.state = { kind: "idle" };
     }
   }
 
@@ -515,8 +525,10 @@ export class GameEngine {
       targetPosition = deposit.position;
     } else if (state.kind === "dropoffMove") {
       const building = this.entities.get(state.dropoffId);
-      if (!building) { unit.state = { kind: "idle" }; return; }
-      targetPosition = building.position;
+      if (!building || building.kind !== "building") { unit.state = { kind: "idle" }; return; }
+      const entry = this._nearestBuildingEntryPoint(building as BuildingEntity, unit.position);
+      if (!entry) { unit.state = { kind: "idle" }; return; }
+      targetPosition = entry;
     } else {
       targetPosition = state.heading === "toB" ? state.pointB : state.pointA;
     }
@@ -574,8 +586,16 @@ export class GameEngine {
 
       if (!deposit || deposit.quantity <= 0) {
         this.depositOccupants.delete(depositId);
-        unit.carrying = null;
-        unit.state = { kind: "idle" };
+        if (unit.carrying && unit.carrying.amount > 0) {
+          // Still carrying something — drop it off, then auto-find next deposit
+          this._sendToDropoff(unit, depositId);
+        } else {
+          // Nothing carrying — find next same-kind deposit within search radius
+          const kind = deposit?.kind ?? "wood";
+          const alt = this._findNearestUnoccupiedDeposit(kind, unit.position, GATHER_SEARCH_RADIUS);
+          if (alt) this.issueGatherOrder(unit.id, alt.id);
+          else unit.state = { kind: "idle" };
+        }
         continue;
       }
 
@@ -601,20 +621,19 @@ export class GameEngine {
     const buildings = this.entities.buildingsByFaction(unit.faction).filter((b) => b.isOperational);
     if (buildings.length === 0) { unit.state = { kind: "idle" }; return; }
 
-    // Find nearest
+    // Find nearest building, measured to its closest entry point from the unit
     let nearest = buildings[0]!;
     let nearestDist = Infinity;
     for (const b of buildings) {
-      const dx = b.position.x - unit.position.x;
-      const dy = b.position.y - unit.position.y;
+      const entry = this._nearestBuildingEntryPoint(b, unit.position);
+      if (!entry) continue;
+      const dx = entry.x - unit.position.x;
+      const dy = entry.y - unit.position.y;
       const d = dx * dx + dy * dy;
       if (d < nearestDist) { nearestDist = d; nearest = b; }
     }
 
-    const goal = this._nearestPassable({
-      x: Math.floor(nearest.position.x),
-      y: Math.floor(nearest.position.y),
-    });
+    const goal = this._nearestBuildingEntryPoint(nearest, unit.position);
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
     const path = goal ? findPath(this.grid, start, goal) : null;
 
@@ -626,10 +645,48 @@ export class GameEngine {
     }
   }
 
-  private _findNearestUnoccupiedDeposit(kind: "wood" | "water", fromPos: Vec2): ResourceDeposit | null {
-    const available = this.deposits.filter(
-      (d) => d.kind === kind && d.quantity > 0 && !this.depositOccupants.has(d.id),
-    );
+  /**
+   * Returns the passable tile adjacent to the building footprint perimeter closest to
+   * `fromPos`. Used for dropoff pathing so units don't always beeline to the top-left corner.
+   */
+  private _nearestBuildingEntryPoint(building: BuildingEntity, fromPos: Vec2): Vec2 | null {
+    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
+    const bx = Math.floor(building.position.x);
+    const by = Math.floor(building.position.y);
+
+    let best: Vec2 | null = null;
+    let bestDist = Infinity;
+
+    for (let dy = -1; dy <= fp; dy++) {
+      for (let dx = -1; dx <= fp; dx++) {
+        const onEdge = dx === -1 || dx === fp || dy === -1 || dy === fp;
+        if (!onEdge) continue;
+        const tx = bx + dx;
+        const ty = by + dy;
+        if (!this.grid.isPassable(tx, ty)) continue;
+        const d = (tx - fromPos.x) ** 2 + (ty - fromPos.y) ** 2;
+        if (d < bestDist) { bestDist = d; best = { x: tx, y: ty }; }
+      }
+    }
+    return best;
+  }
+
+  private _findNearestUnoccupiedDeposit(
+    kind: "wood" | "water",
+    fromPos: Vec2,
+    maxDistTiles?: number,
+  ): ResourceDeposit | null {
+    const maxDistSq = maxDistTiles !== undefined ? maxDistTiles * maxDistTiles : Infinity;
+    const available = this.deposits.filter((d) => {
+      if (d.kind !== kind || d.quantity <= 0 || this.depositOccupants.has(d.id)) return false;
+      if (maxDistSq < Infinity) {
+        const dx = d.position.x - fromPos.x;
+        const dy = d.position.y - fromPos.y;
+        if (dx * dx + dy * dy > maxDistSq) return false;
+      }
+      return true;
+    });
     if (available.length === 0) return null;
     available.sort((a, b) => {
       const da = (a.position.x - fromPos.x) ** 2 + (a.position.y - fromPos.y) ** 2;
@@ -754,7 +811,18 @@ export class GameEngine {
     const by = Math.floor(building.position.y);
     for (let dy = 0; dy < fp; dy++) {
       for (let dx = 0; dx < fp; dx++) {
-        this.grid.blockTile(bx + dx, by + dy);
+        const tx = bx + dx;
+        const ty = by + dy;
+        this.grid.blockTile(tx, ty);
+        // Clear any forest/resource tiles under the footprint — trees are removed when
+        // a building is placed on them.
+        // TODO(building-placement): validate that buildings cannot be placed on water tiles.
+        const tile = this.grid.getTile(tx, ty);
+        if (tile?.terrain === "forest") {
+          this.grid.setTerrain(tx, ty, "open");
+          const idx = this.deposits.findIndex((d) => d.position.x === tx && d.position.y === ty);
+          if (idx !== -1) this.deposits.splice(idx, 1);
+        }
       }
     }
   }

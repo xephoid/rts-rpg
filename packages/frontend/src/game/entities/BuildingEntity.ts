@@ -28,7 +28,8 @@ export class BuildingEntity extends Entity {
   }
 
   get isOperational(): boolean {
-    return this.state.kind === "operational";
+    // "producing" is still operational as a structure — units can still drop off resources.
+    return this.state.kind === "operational" || this.state.kind === "producing";
   }
 
   override toSnapshot() {
