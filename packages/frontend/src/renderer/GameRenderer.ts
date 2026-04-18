@@ -52,7 +52,6 @@ export class GameRenderer {
   private app: Application | null = null;
   private worldContainer: Container | null = null;
   private tileContainer: Container | null = null;
-  private fogContainer: Container | null = null;
   private fogTexture: RenderTexture | null = null;
   private fogSprite: Sprite | null = null;
   private activeFaction: Faction = "wizards";
@@ -97,6 +96,17 @@ export class GameRenderer {
   private initialized = false;
   private destroyed = false;
 
+  // Viewport-culled tile sprites
+  private tileSprites = new Map<string, Sprite>(); // key: "x,y"
+  private _allTiles: TileSnapshot[] = [];
+  private _lastViewportBounds = { x0: -1, y0: -1, x1: -1, y1: -1 };
+
+  // Fog dirty tracking
+  private _lastFogCameraX = -1;
+  private _lastFogCameraY = -1;
+  private _lastFogZoomIndex = -1;
+  private _lastFogDataRef: Uint8Array | number[] | null = null;
+
   // Build mode ghost state
   private ghostContainer: Container | null = null;
   private buildMode: { typeKey: string; footprintTiles: number; faction: "wizards" | "robots" } | null = null;
@@ -132,10 +142,7 @@ export class GameRenderer {
     this.entityContainer = new Container();
     this.worldContainer.addChild(this.entityContainer);
 
-    this.fogContainer = new Container();
-    this.worldContainer.addChild(this.fogContainer);
-
-    // Ghost placement overlay — in world space, above fog
+    // Ghost placement overlay — in world space, above entities
     this.ghostContainer = new Container();
     this.worldContainer.addChild(this.ghostContainer);
 
@@ -184,18 +191,19 @@ export class GameRenderer {
       }
     }
 
-    const tileCount = state.tiles.length;
-    let tilesDirty = this.tileContainer.children.length !== tileCount;
-    if (!tilesDirty) {
-      for (const tile of state.tiles) {
-        if (this.lastTiles.get(`${tile.x},${tile.y}`)?.terrain !== tile.terrain) {
-          tilesDirty = true;
-          break;
-        }
+    // Record map dimensions and full tile set on first render
+    if (this._allTiles.length === 0 && state.tiles.length > 0) {
+      this._allTiles = state.tiles;
+      let maxX = 0, maxY = 0;
+      for (const t of state.tiles) {
+        if (t.x > maxX) maxX = t.x;
+        if (t.y > maxY) maxY = t.y;
+        this.lastTiles.set(`${t.x},${t.y}`, t);
       }
+      this.mapWidthTiles = maxX + 1;
+      this.mapHeightTiles = maxY + 1;
     }
-    for (const tile of state.tiles) this.lastTiles.set(`${tile.x},${tile.y}`, tile);
-    if (tilesDirty) this._buildTileLayer(state.tiles);
+    this._updateViewportTiles();
 
     this.lastDeposits.clear();
     for (const d of state.deposits ?? []) {
@@ -318,38 +326,66 @@ export class GameRenderer {
   }
 
   private _renderFog(fog: FogSnapshot): void {
-    if (!this.fogContainer || !this.app) return;
+    if (!this.app) return;
 
     const { width, height, data } = fog;
-    const pixelW = width * TILE_SIZE;
-    const pixelH = height * TILE_SIZE;
+    const zoom = ZOOM_LEVELS[this.zoomIndex]!;
+    const tilePx = TILE_SIZE * zoom;
+    const screenW = this.app.screen.width;
+    const screenH = this.app.screen.height;
 
-    // Create or recreate RenderTexture when map size changes
-    if (!this.fogTexture || this.fogTexture.width !== pixelW || this.fogTexture.height !== pixelH) {
+    // Screen-sized RenderTexture — avoids allocating a 16K×16K texture for a 256×256 map
+    if (!this.fogTexture ||
+        Math.abs(this.fogTexture.width - screenW) > 1 ||
+        Math.abs(this.fogTexture.height - screenH) > 1) {
       this.fogTexture?.destroy(true);
       this.fogSprite?.destroy();
-      this.fogTexture = RenderTexture.create({ width: pixelW, height: pixelH });
+      this.fogTexture = RenderTexture.create({ width: screenW, height: screenH });
       this.fogSprite = new Sprite(this.fogTexture);
-      this.fogContainer.removeChildren();
-      this.fogContainer.addChild(this.fogSprite);
+      this.fogSprite.x = 0;
+      this.fogSprite.y = 0;
+      this.fogSprite.eventMode = "none";
+      // Insert between worldContainer and rubberBandContainer
+      const worldIdx = this.app.stage.children.indexOf(this.worldContainer!);
+      this.app.stage.addChildAt(this.fogSprite, worldIdx + 1);
+      // Bring rubber band back to top
+      if (this.rubberBandContainer) this.app.stage.addChild(this.rubberBandContainer);
+      // Reset dirty markers so we redraw immediately
+      this._lastFogDataRef = null;
     }
 
-    // Draw fog tiles onto RenderTexture
+    // Skip redraw when camera, zoom, and fog data are all unchanged
+    if (data === this._lastFogDataRef &&
+        this.cameraX === this._lastFogCameraX &&
+        this.cameraY === this._lastFogCameraY &&
+        this.zoomIndex === this._lastFogZoomIndex) return;
+
+    this._lastFogDataRef = data;
+    this._lastFogCameraX = this.cameraX;
+    this._lastFogCameraY = this.cameraY;
+    this._lastFogZoomIndex = this.zoomIndex;
+
+    // Only draw fog rects for tiles in current viewport (+1 tile buffer for smooth panning)
+    const BUFFER = 1;
+    const tx0 = Math.max(0, Math.floor(this.cameraX / tilePx) - BUFFER);
+    const ty0 = Math.max(0, Math.floor(this.cameraY / tilePx) - BUFFER);
+    const tx1 = Math.min(width - 1, Math.ceil((this.cameraX + screenW) / tilePx) + BUFFER);
+    const ty1 = Math.min(height - 1, Math.ceil((this.cameraY + screenH) / tilePx) + BUFFER);
+
     const g = new Graphics();
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const v = data[y * width + x];
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const v = data[ty * width + tx];
         if (v === 2) continue; // VISIBLE — no overlay
 
-        const px = x * TILE_SIZE;
-        const py = y * TILE_SIZE;
+        // Screen-space position of this tile
+        const sx = tx * tilePx - this.cameraX;
+        const sy = ty * tilePx - this.cameraY;
 
         if (v === 0) {
-          // UNEXPLORED — solid black
-          g.rect(px, py, TILE_SIZE, TILE_SIZE).fill({ color: 0x000000, alpha: 1 });
+          g.rect(sx, sy, tilePx, tilePx).fill({ color: 0x000000, alpha: 1 });
         } else {
-          // EXPLORED — semi-transparent dark overlay, desaturating the tile beneath
-          g.rect(px, py, TILE_SIZE, TILE_SIZE).fill({ color: 0x050512, alpha: 0.65 });
+          g.rect(sx, sy, tilePx, tilePx).fill({ color: 0x050512, alpha: 0.65 });
         }
       }
     }
@@ -358,35 +394,68 @@ export class GameRenderer {
     g.destroy();
   }
 
-  private _buildTileLayer(tiles: TileSnapshot[]): void {
-    if (!this.tileContainer) return;
-    this.tileContainer.removeChildren();
+  private _viewportTileBounds(buffer = 2): { x0: number; y0: number; x1: number; y1: number } {
+    if (!this.app || this.mapWidthTiles === 0) return { x0: 0, y0: 0, x1: 0, y1: 0 };
+    const zoom = ZOOM_LEVELS[this.zoomIndex]!;
+    const tilePx = TILE_SIZE * zoom;
+    const screenW = this.app.screen.width;
+    const screenH = this.app.screen.height;
+    return {
+      x0: Math.max(0, Math.floor(this.cameraX / tilePx) - buffer),
+      y0: Math.max(0, Math.floor(this.cameraY / tilePx) - buffer),
+      x1: Math.min(this.mapWidthTiles - 1, Math.ceil((this.cameraX + screenW) / tilePx) + buffer),
+      y1: Math.min(this.mapHeightTiles - 1, Math.ceil((this.cameraY + screenH) / tilePx) + buffer),
+    };
+  }
 
-    for (const tile of tiles) {
-      const texturePath = this._terrainTexturePath(tile);
-      let sprite: Sprite;
-      try {
-        sprite = Sprite.from(texturePath);
-      } catch {
-        // Texture not loaded — use a fallback colored rect via tint on empty sprite
-        sprite = new Sprite();
-        sprite.tint = this._terrainFallbackColor(tile.terrain);
-        sprite.width = TILE_SIZE;
-        sprite.height = TILE_SIZE;
+  private _createTileSprite(tile: TileSnapshot): Sprite {
+    const texturePath = this._terrainTexturePath(tile);
+    let sprite: Sprite;
+    try {
+      sprite = Sprite.from(texturePath);
+    } catch {
+      sprite = new Sprite();
+      sprite.tint = this._terrainFallbackColor(tile.terrain);
+    }
+    sprite.x = tile.x * TILE_SIZE;
+    sprite.y = tile.y * TILE_SIZE;
+    sprite.width = TILE_SIZE;
+    sprite.height = TILE_SIZE;
+    return sprite;
+  }
+
+  private _updateViewportTiles(): void {
+    if (!this.tileContainer || this._allTiles.length === 0) return;
+    const b = this._viewportTileBounds(2);
+
+    // Skip update if viewport tile bounds haven't changed
+    if (b.x0 === this._lastViewportBounds.x0 && b.y0 === this._lastViewportBounds.y0 &&
+        b.x1 === this._lastViewportBounds.x1 && b.y1 === this._lastViewportBounds.y1) return;
+    this._lastViewportBounds = b;
+
+    // Remove sprites that scrolled out of bounds
+    for (const [key, sprite] of this.tileSprites) {
+      const i = key.indexOf(",");
+      const x = +key.slice(0, i);
+      const y = +key.slice(i + 1);
+      if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) {
+        if (sprite.parent) sprite.parent.removeChild(sprite);
+        sprite.destroy();
+        this.tileSprites.delete(key);
       }
-      sprite.x = tile.x * TILE_SIZE;
-      sprite.y = tile.y * TILE_SIZE;
-      sprite.width = TILE_SIZE;
-      sprite.height = TILE_SIZE;
-      this.tileContainer.addChild(sprite);
     }
 
-    // Track map bounds for camera clamping
-    if (tiles.length > 0) {
-      const maxX = Math.max(...tiles.map((t) => t.x));
-      const maxY = Math.max(...tiles.map((t) => t.y));
-      this.mapWidthTiles = maxX + 1;
-      this.mapHeightTiles = maxY + 1;
+    // Add sprites for tiles now in bounds
+    for (let y = b.y0; y <= b.y1; y++) {
+      for (let x = b.x0; x <= b.x1; x++) {
+        const key = `${x},${y}`;
+        if (this.tileSprites.has(key)) continue;
+        const tile = this.lastTiles.get(key);
+        if (!tile) continue;
+        const sprite = this._createTileSprite(tile);
+        this.tileSprites.set(key, sprite);
+        this.tileContainer.addChild(sprite);
+      }
     }
   }
 
@@ -867,6 +936,8 @@ export class GameRenderer {
     }
     this.fogTexture?.destroy(true);
     this.fogTexture = null;
+    for (const sprite of this.tileSprites.values()) sprite.destroy();
+    this.tileSprites.clear();
     for (const sprite of this.entitySprites.values()) sprite.destroy();
     this.entitySprites.clear();
     this.selectionGfx = null;
