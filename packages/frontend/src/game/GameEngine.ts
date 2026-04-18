@@ -316,6 +316,25 @@ export class GameEngine {
     unit.state = { kind: "gatherMove", depositId, path, yieldTicks: 0 };
   }
 
+  issueAttackOrder(unitId: string, targetId: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    this._releaseDepositOccupancy(unit);
+    // TODO(phase-combat): _processAttacks() not yet implemented — sets state only.
+    // When combat phase lands: range-check target, path into range, then deal damage each tick.
+    unit.state = { kind: "attacking", targetId };
+  }
+
+  issueTalkOrder(unitId: string, targetId: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    // TODO(phase-diplomacy): talk/conversion logic not yet implemented.
+    // When diplomacy phase lands: check unit has charisma capability, path to target,
+    // then transition to converting state and run charisma checks each tick.
+    void targetId;
+  }
+
   issueProductionOrder(buildingId: string, unitTypeKey: string): void {
     const entity = this.entities.get(buildingId);
     if (!entity || entity.kind !== "building") return;

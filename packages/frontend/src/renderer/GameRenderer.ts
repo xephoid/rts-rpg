@@ -27,6 +27,13 @@ export type RendererConfig = {
   onEntitySelect?: (ids: string[], kind: "unit" | "building" | null) => void;
   onMoveOrder?: (entityIds: string[], target: { x: number; y: number }) => void;
   onGatherOrder?: (unitIds: string[], depositId: string) => void;
+  /** Called when a friendly unit right-clicks an enemy entity. */
+  onAttackOrder?: (unitIds: string[], targetId: string) => void;
+  /**
+   * Called when a friendly unit right-clicks an allied entity.
+   * TODO(phase-diplomacy): filter to units with talk capability before calling.
+   */
+  onTalkOrder?: (unitIds: string[], targetId: string) => void;
 };
 
 export class GameRenderer {
@@ -571,7 +578,26 @@ export class GameRenderer {
     const tileX = world.x / TILE_SIZE;
     const tileY = world.y / TILE_SIZE;
 
-    // Check deposits first — right-click on visible deposit → gather order
+    // Context-smart right-click order priority:
+    //   1. Enemy entity  → attack
+    //   2. Ally entity   → talk
+    //   3. Resource deposit → gather
+    //   4. Empty space   → move
+    // TODO(capabilities): each branch should filter friendlyIds to only units
+    // that support that action (e.g. only gatherers gather, only charisma units talk).
+    // Until capability filtering exists, all friendly units receive every order type
+    // and the engine silently ignores orders the unit can't act on.
+
+    const hitEntity = this.lastEntities.find((e) => this._hitTest(e, tileX, tileY));
+    if (hitEntity && this._fogValueAt(hitEntity.position.x, hitEntity.position.y) === 2) {
+      if (hitEntity.faction !== this.activeFaction) {
+        this.config.onAttackOrder?.(friendlyIds, hitEntity.id);
+      } else if (hitEntity.id !== [...this.selectedIds][0]) {
+        this.config.onTalkOrder?.(friendlyIds, hitEntity.id);
+      }
+      return;
+    }
+
     const hitDeposit = this.lastDeposits.find((d) => {
       if (this._fogValueAt(d.position.x, d.position.y) < 2) return false;
       const dx = tileX - (d.position.x + 0.5);

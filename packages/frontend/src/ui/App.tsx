@@ -46,6 +46,12 @@ export function App() {
       onGatherOrder: (unitIds, depositId) => {
         for (const id of unitIds) engineRef.current?.issueGatherOrder(id, depositId);
       },
+      onAttackOrder: (unitIds, targetId) => {
+        for (const id of unitIds) engineRef.current?.issueAttackOrder(id, targetId);
+      },
+      onTalkOrder: (unitIds, targetId) => {
+        for (const id of unitIds) engineRef.current?.issueTalkOrder(id, targetId);
+      },
       onMoveOrder: (entityIds, target) => {
         const { pendingPatrolIds, setPendingPatrolIds } = useUIStore.getState();
         if (pendingPatrolIds && pendingPatrolIds.length > 0) {
