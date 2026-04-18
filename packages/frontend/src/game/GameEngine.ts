@@ -551,12 +551,15 @@ export class GameEngine {
 
     for (const pos of blockedByUnits) this.grid.unblockTile(pos.x, pos.y);
 
-    if (path && path.length > 0) {
+    if (path !== null && path.length > 0) {
       if (state.kind === "moving") {
         unit.state = { kind: "moving", targetPosition, path, yieldTicks: 0 };
       } else {
         unit.state = { ...state, path, yieldTicks: 0 };
       }
+    } else if (path !== null) {
+      // Empty path — unit is already at the target tile after rounding; trigger arrival.
+      this._onUnitArrived(unit);
     } else {
       unit.state = { kind: "idle" };
     }
