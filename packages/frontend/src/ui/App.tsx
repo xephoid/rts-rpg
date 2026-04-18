@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GameEngine } from "../game/GameEngine.js";
 import { GameRenderer } from "../renderer/GameRenderer.js";
 import { useGameStore } from "../store/gameStore.js";
@@ -6,15 +6,19 @@ import { useUIStore } from "../store/uiStore.js";
 import { AlertLog } from "./hud/AlertLog.js";
 import { BottomPanel } from "./hud/BottomPanel.js";
 import { ResourceBar } from "./hud/ResourceBar.js";
+import { StartScreen } from "./screens/StartScreen.js";
 import styles from "./App.module.css";
 
 const PAN_STEP = 192; // pixels per WASD keydown
 
 export function App() {
+  const [screen, setScreen] = useState<"start" | "playing">("start");
+  const mapSizeRef = useRef<"small" | "medium" | "large">("small");
   const canvasRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<GameRenderer | null>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const pushGameState = useGameStore((s) => s.pushGameState);
+  const setActiveFaction = useUIStore((s) => s.setActiveFaction);
   const activeFaction = useUIStore((s) => s.activeFaction);
   const cameraTarget = useUIStore((s) => s.cameraTarget);
   const setCameraTarget = useUIStore((s) => s.setCameraTarget);
@@ -43,8 +47,9 @@ export function App() {
   const pendingManaShieldToggle = useUIStore((s) => s.pendingManaShieldToggle);
   const clearPendingManaShieldToggle = useUIStore((s) => s.clearPendingManaShieldToggle);
 
-  // Init renderer + engine
+  // Init renderer + engine — only once faction has been chosen
   useEffect(() => {
+    if (screen !== "playing") return;
     if (!canvasRef.current) return;
 
     let cancelled = false;
@@ -104,7 +109,7 @@ export function App() {
     rendererRef.current = renderer;
 
     const engine = new GameEngine({
-      mapSize: "small",
+      mapSize: mapSizeRef.current,
       seed: 42,
       onTick: (state) => {
         pushGameState(state);
@@ -129,7 +134,7 @@ export function App() {
       engine.stop();
       renderer.destroy();
     };
-  }, [pushGameState]);
+  }, [pushGameState, screen]);
 
   // Sync active faction to renderer
   useEffect(() => {
@@ -289,6 +294,18 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  if (screen === "start") {
+    return (
+      <StartScreen
+        onStart={(faction, mapSize) => {
+          mapSizeRef.current = mapSize;
+          setActiveFaction(faction);
+          setScreen("playing");
+        }}
+      />
+    );
+  }
 
   return (
     <div className={styles.root}>

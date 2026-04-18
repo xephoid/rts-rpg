@@ -1,0 +1,155 @@
+.screen {
+  width: 100vw;
+  height: 100vh;
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  font-family: var(--font-body);
+  color: #e2d9f3;
+}
+
+.title {
+  font-family: var(--font-header);
+  font-size: 42px;
+  letter-spacing: 0.06em;
+  color: #e2d9f3;
+  text-align: center;
+  text-shadow: 0 0 24px rgba(168, 85, 247, 0.4);
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #9ca3af;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-top: -20px;
+}
+
+.cards {
+  display: flex;
+  flex-direction: row;
+  gap: 32px;
+  align-items: stretch;
+}
+
+.card {
+  width: 260px;
+  padding: 28px 24px;
+  background: rgba(16, 10, 22, 0.9);
+  border: 2px solid var(--color-panel-border);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  text-align: center;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+}
+
+.cardWizards {
+  border-color: var(--color-wizard-primary);
+}
+
+.cardWizards:hover {
+  border-color: var(--color-wizard-light);
+  box-shadow: 0 0 24px rgba(124, 58, 237, 0.35);
+}
+
+.cardRobots {
+  border-color: var(--color-robot-primary);
+}
+
+.cardRobots:hover {
+  border-color: var(--color-robot-light);
+  box-shadow: 0 0 24px rgba(202, 138, 4, 0.35);
+}
+
+.factionName {
+  font-family: var(--font-header);
+  font-size: 26px;
+  letter-spacing: 0.04em;
+}
+
+.cardWizards .factionName {
+  color: var(--color-wizard-light);
+}
+
+.cardRobots .factionName {
+  color: var(--color-robot-light);
+}
+
+.leaderName {
+  font-size: 13px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.tagline {
+  font-size: 13px;
+  color: #d1d5db;
+  line-height: 1.5;
+}
+
+.startHint {
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 8px;
+}
+
+.mapSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.mapLabel {
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.mapRow {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.mapBtn {
+  padding: 6px 20px;
+  background: rgba(16, 10, 22, 0.9);
+  border: 1px solid rgba(100, 60, 140, 0.35);
+  border-radius: 4px;
+  color: #9ca3af;
+  font-family: var(--font-body);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.mapBtn:hover {
+  border-color: var(--color-wizard-mid);
+  color: #e2d9f3;
+}
+
+.mapBtnActive {
+  border-color: var(--color-wizard-primary);
+  color: var(--color-wizard-light);
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.mapDims {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
