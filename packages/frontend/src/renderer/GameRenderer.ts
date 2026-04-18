@@ -185,17 +185,32 @@ export class GameRenderer {
       }
     }
 
-    // Record map dimensions and full tile set on first render
+    // Record map dimensions on first render; update lastTiles every tick so
+    // terrain changes (e.g. forest→open when wood depleted) are reflected.
     if (this._allTiles.length === 0 && state.tiles.length > 0) {
       this._allTiles = state.tiles;
       let maxX = 0, maxY = 0;
       for (const t of state.tiles) {
         if (t.x > maxX) maxX = t.x;
         if (t.y > maxY) maxY = t.y;
-        this.lastTiles.set(`${t.x},${t.y}`, t);
       }
       this.mapWidthTiles = maxX + 1;
       this.mapHeightTiles = maxY + 1;
+    }
+    // Detect terrain changes and evict stale sprites so they get recreated
+    for (const t of state.tiles) {
+      const key = `${t.x},${t.y}`;
+      const prev = this.lastTiles.get(key);
+      if (prev && prev.terrain !== t.terrain) {
+        const sprite = this.tileSprites.get(key);
+        if (sprite) {
+          if (sprite.parent) sprite.parent.removeChild(sprite);
+          sprite.destroy();
+          this.tileSprites.delete(key);
+        }
+        this._lastViewportBounds = { x0: -1, y0: -1, x1: -1, y1: -1 }; // force rebuild
+      }
+      this.lastTiles.set(key, t);
     }
     this._updateViewportTiles();
 
