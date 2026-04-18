@@ -21,6 +21,11 @@ export const spellCosts = {
   manaShieldDrainPerSec: 8, // Initial guess: drains continuously while active
 };
 
+export const manaConfig = {
+  // Initial guess: 500 mana cap for the wizard faction.
+  manaMax: 500,
+};
+
 export const spellEffects = {
   iceBlast: {
     // Initial guess: slows target to 40% speed for 3 seconds.

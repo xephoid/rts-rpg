@@ -40,6 +40,8 @@ export function App() {
   const clearPendingAttach = useUIStore((s) => s.clearPendingAttach);
   const pendingDetach = useUIStore((s) => s.pendingDetach);
   const clearPendingDetach = useUIStore((s) => s.clearPendingDetach);
+  const pendingManaShieldToggle = useUIStore((s) => s.pendingManaShieldToggle);
+  const clearPendingManaShieldToggle = useUIStore((s) => s.clearPendingManaShieldToggle);
 
   // Init renderer + engine
   useEffect(() => {
@@ -237,6 +239,13 @@ export function App() {
     engineRef.current?.issueDetachOrder(pendingDetach.platformId);
     clearPendingDetach();
   }, [pendingDetach, clearPendingDetach]);
+
+  // Consume pending mana shield toggle orders
+  useEffect(() => {
+    if (!pendingManaShieldToggle) return;
+    engineRef.current?.issueManaShieldToggle(pendingManaShieldToggle);
+    clearPendingManaShieldToggle();
+  }, [pendingManaShieldToggle, clearPendingManaShieldToggle]);
 
   // WASD panning
   useEffect(() => {

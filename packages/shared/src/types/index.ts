@@ -61,6 +61,8 @@ export type EntitySnapshot = {
   materialType?: "wood" | "metal" | null;
   /** True while this unit is a hidden passenger (Core inside platform). */
   isShell?: boolean;
+  /** True while this wizard unit has Mana Shield active. */
+  manaShielded?: boolean;
 };
 
 export type TileSnapshot = {

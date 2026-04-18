@@ -98,6 +98,11 @@ export type UIStore = {
   pendingDetach: { platformId: string } | null;
   issueDetach: (platformId: string) => void;
   clearPendingDetach: () => void;
+
+  /** Mana Shield toggle order for a wizard unit. */
+  pendingManaShieldToggle: string | null;
+  issueManaShieldToggle: (unitId: string) => void;
+  clearPendingManaShieldToggle: () => void;
 };
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -173,4 +178,8 @@ export const useUIStore = create<UIStore>((set) => ({
   pendingDetach: null,
   issueDetach: (platformId) => set({ pendingDetach: { platformId } }),
   clearPendingDetach: () => set({ pendingDetach: null }),
+
+  pendingManaShieldToggle: null,
+  issueManaShieldToggle: (unitId) => set({ pendingManaShieldToggle: unitId }),
+  clearPendingManaShieldToggle: () => set({ pendingManaShieldToggle: null }),
 }));

@@ -14,6 +14,7 @@ import {
   wizardBuildingCosts,
   robotBuildingStats,
   wizardBuildingStats,
+  wizardUnitStats,
 } from "@neither/shared";
 import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
@@ -24,6 +25,7 @@ const ROBOT_PLATFORM_TYPES_UI = new Set([
   "spinnerPlatform", "spitterPlatform", "infiltrationPlatform",
   "largeCombatPlatform", "probePlatform", "wallPlatform",
 ]);
+const WIZARD_UNIT_TYPES_UI = new Set(Object.keys(wizardUnitStats));
 
 const UNIT_COMMANDS = ["Move", "Stop", "Attack", "Patrol", "Hold", "Talk", "Convert", "Board"];
 const BUILDING_COMMANDS = ["Cancel", "Demolish"];
@@ -49,6 +51,7 @@ export function CommandsPanel() {
   const issueResearch = useUIStore((s) => s.issueResearch);
   const issueCancelResearch = useUIStore((s) => s.issueCancelResearch);
   const issueDetach = useUIStore((s) => s.issueDetach);
+  const issueManaShieldToggle = useUIStore((s) => s.issueManaShieldToggle);
   const buildMenuOpen = useUIStore((s) => s.buildMenuOpen);
   const setBuildMenuOpen = useUIStore((s) => s.setBuildMenuOpen);
   const setBuildMode = useUIStore((s) => s.setBuildMode);
@@ -384,6 +387,27 @@ export function CommandsPanel() {
                 onClick={() => issueDetach(entity.id)}
               >
                 Detach
+              </button>
+            );
+          }
+          return null;
+        })()}
+        {selection.mode === "single" && selection.kind === "unit" && (() => {
+          const entity = gameState?.entities.find((e) => e.id === selection.id);
+          const completed = gameState?.completedResearch?.wizards ?? [];
+          if (
+            entity?.faction === "wizards" &&
+            WIZARD_UNIT_TYPES_UI.has(entity.typeKey) &&
+            completed.includes("manaShield")
+          ) {
+            return (
+              <button
+                key="ManaShield"
+                className={`${styles.cmdBtn}${entity.manaShielded ? ` ${styles.cmdBtnActive}` : ""}`}
+                onClick={() => issueManaShieldToggle(entity.id)}
+                title={entity.manaShielded ? "Deactivate Mana Shield" : "Activate Mana Shield"}
+              >
+                Shield
               </button>
             );
           }

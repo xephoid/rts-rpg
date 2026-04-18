@@ -165,6 +165,13 @@ export function UnitStatsPanel() {
           </div>
         )}
 
+        {entity.kind === "unit" && entity.manaShielded && (
+          <div className={styles.carryRow}>
+            <span className={styles.carryLabel}>Ability</span>
+            <span className={`${styles.carryValue} ${styles.shieldActive}`}>Mana Shield</span>
+          </div>
+        )}
+
         {entity.kind === "unit" && (
           <div className={styles.xpRow}>
             <div className={styles.xpLabel}>

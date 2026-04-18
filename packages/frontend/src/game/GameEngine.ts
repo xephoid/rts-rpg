@@ -31,6 +31,10 @@ import {
   buildingResearch,
   researchCosts,
   xpRates,
+  manaGen,
+  spellCosts,
+  manaConfig,
+  amphitheatreXpBoost,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
@@ -72,6 +76,7 @@ const ROBOT_PLATFORM_TYPES = new Set([
   "spinnerPlatform", "spitterPlatform", "infiltrationPlatform",
   "largeCombatPlatform", "probePlatform", "wallPlatform",
 ]);
+const WIZARD_UNIT_TYPES = new Set(Object.keys(wizardUnitStats));
 /**
  * Max tile radius a gatherer will search for the next deposit after exhausting one.
  * Initial guess: ~20 tiles (~1/3 of small map width). Adjust after playtesting.
@@ -1332,6 +1337,68 @@ export class GameEngine {
     }
   }
 
+  // ── Mana ─────────────────────────────────────────────────────────────────────
+
+  private _processMana(): void {
+    const res = this.resources.wizards;
+    const wizardUnits = this.entities.unitsByFaction("wizards").filter(
+      (u) => WIZARD_UNIT_TYPES.has(u.typeKey) && u.state.kind !== "platformShell",
+    );
+    const reservoirs = this.entities.buildingsByFaction("wizards").filter(
+      (b) => b.typeKey === "manaReservoir" && b.isOperational,
+    );
+
+    for (const unit of wizardUnits) {
+      const nearReservoir = reservoirs.some((r) => {
+        const dx = r.position.x - unit.position.x;
+        const dy = r.position.y - unit.position.y;
+        return Math.sqrt(dx * dx + dy * dy) <= manaGen.reservoirProximityRadiusTiles;
+      });
+      res.mana += manaGen.perWizardUnitPerTick * (nearReservoir ? manaGen.reservoirProximityMultiplier : 1);
+    }
+
+    res.mana += reservoirs.length * manaGen.reservoirBaseTick;
+    res.mana = Math.min(res.mana, manaConfig.manaMax);
+
+    const activeShields = wizardUnits.filter((u) => u.manaShielded).length;
+    if (activeShields > 0) {
+      res.mana -= spellCosts.manaShieldDrainPerSec * (TICK_MS / 1000) * activeShields;
+      if (res.mana <= 0) {
+        res.mana = 0;
+        for (const u of wizardUnits) u.manaShielded = false;
+      }
+    }
+  }
+
+  issueManaShieldToggle(unitId: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    if (!WIZARD_UNIT_TYPES.has(unit.typeKey)) return;
+    if (!this._completedResearch.get("wizards")?.has("manaShield")) return;
+    if (!unit.manaShielded && this.resources.wizards.mana <= 0) return;
+    unit.manaShielded = !unit.manaShielded;
+  }
+
+  private _processAmphitheatreXp(tick: number): void {
+    if (tick % AUTO_COLLECTION_INTERVAL_TICKS !== 0) return;
+    const amphitheatres = this.entities.buildingsByFaction("wizards").filter(
+      (b) => b.typeKey === "amphitheatre" && b.isOperational,
+    );
+    if (amphitheatres.length === 0) return;
+    const radiusSq = amphitheatreXpBoost.radiusTiles ** 2;
+    for (const unit of this.entities.unitsByFaction("wizards")) {
+      if (!WIZARD_UNIT_TYPES.has(unit.typeKey)) continue;
+      if (amphitheatres.some((b) => {
+        const dx = b.position.x - unit.position.x;
+        const dy = b.position.y - unit.position.y;
+        return dx * dx + dy * dy <= radiusSq;
+      })) {
+        this.giveXp(unit.id, amphitheatreXpBoost.xpPerSec);
+      }
+    }
+  }
+
   // ── Utility ───────────────────────────────────────────────────────────────────
 
   /** Nearest passable tile adjacent to platformPos, preferring the tile closest to fromPos. */
@@ -1458,6 +1525,8 @@ export class GameEngine {
     this._processAttacks();
     this._processAutoAggro(tick);
     this._processAutoCollection(tick);
+    this._processMana();
+    this._processAmphitheatreXp(tick);
     this._updateFog(tick);
     this.events.flushDeferred();
 

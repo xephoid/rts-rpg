@@ -283,6 +283,10 @@
   text-transform: capitalize;
 }
 
+.shieldActive {
+  color: #a78bfa;
+}
+
 .queueRow {
   display: flex;
   align-items: center;

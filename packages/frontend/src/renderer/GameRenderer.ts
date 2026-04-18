@@ -3,7 +3,7 @@
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
 import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot } from "@neither/shared";
-import { robotBuildingStats, wizardBuildingStats } from "@neither/shared";
+import { robotBuildingStats, wizardBuildingStats, buildingRequiresAdjacentWater } from "@neither/shared";
 import {
   terrainAssets,
   unitSpritePath,
@@ -18,6 +18,12 @@ export const TILE_SIZE = 64; // pixels at zoom level 1.0
 
 /** Four discrete zoom levels as per spec. */
 export const ZOOM_LEVELS = [0.375, 0.75, 1.0, 1.5] as const;
+
+const ROBOT_PLATFORM_TYPES = new Set([
+  "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform",
+  "spinnerPlatform", "spitterPlatform", "infiltrationPlatform",
+  "largeCombatPlatform", "probePlatform", "wallPlatform",
+]);
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 
 export type RendererConfig = {
@@ -34,6 +40,12 @@ export type RendererConfig = {
    * TODO(phase-diplomacy): filter to units with talk capability before calling.
    */
   onTalkOrder?: (unitIds: string[], targetId: string) => void;
+  /** Called when user confirms a build placement (left-click in build mode). */
+  onBuildOrder?: (tileX: number, tileY: number) => void;
+  /** Called when a builder right-clicks a friendly under-construction building. */
+  onResumeConstructionOrder?: (unitIds: string[], buildingId: string) => void;
+  /** Called when an unattached Core right-clicks a friendly idle platform. */
+  onAttachOrder?: (coreId: string, platformId: string) => void;
 };
 
 export class GameRenderer {
@@ -66,6 +78,7 @@ export class GameRenderer {
   private lastEntities: EntitySnapshot[] = [];
   private lastFog: FogSnapshot | null = null;
   private selectedIds = new Set<string>();
+  private shieldTintedIds = new Set<string>();
 
   // Left-click / rubber band state
   private leftDownPos: { x: number; y: number } | null = null;
@@ -83,6 +96,13 @@ export class GameRenderer {
   private texturesLoaded = false;
   private initialized = false;
   private destroyed = false;
+
+  // Build mode ghost state
+  private ghostContainer: Container | null = null;
+  private buildMode: { typeKey: string; footprintTiles: number; faction: "wizards" | "robots" } | null = null;
+  private ghostTileX = 0;
+  private ghostTileY = 0;
+  private lastTiles = new Map<string, TileSnapshot>();
 
   private readonly config: RendererConfig;
 
@@ -115,6 +135,10 @@ export class GameRenderer {
     this.fogContainer = new Container();
     this.worldContainer.addChild(this.fogContainer);
 
+    // Ghost placement overlay — in world space, above fog
+    this.ghostContainer = new Container();
+    this.worldContainer.addChild(this.ghostContainer);
+
     // Rubber band lives in screen-space on top of everything
     this.rubberBandContainer = new Container();
     this.rubberBandGfx = new Graphics();
@@ -145,10 +169,33 @@ export class GameRenderer {
     this.lastEntities = state.entities;
     this.lastFog = state.fog[this.activeFaction];
 
-    const tileCount = state.tiles.length;
-    if (this.tileContainer.children.length !== tileCount) {
-      this._buildTileLayer(state.tiles);
+    // Auto-switch selection: if selected entity became a shell (Core entered platform), select the platform
+    for (const id of [...this.selectedIds]) {
+      const entity = state.entities.find((e) => e.id === id);
+      if (entity?.isShell) {
+        const platform = state.entities.find((e) => e.attachedCoreId === id);
+        if (platform) {
+          this.selectedIds = new Set([platform.id]);
+          this.config.onEntitySelect?.([platform.id], "unit");
+        } else {
+          this.selectedIds.delete(id);
+          this.config.onEntitySelect?.([], null);
+        }
+      }
     }
+
+    const tileCount = state.tiles.length;
+    let tilesDirty = this.tileContainer.children.length !== tileCount;
+    if (!tilesDirty) {
+      for (const tile of state.tiles) {
+        if (this.lastTiles.get(`${tile.x},${tile.y}`)?.terrain !== tile.terrain) {
+          tilesDirty = true;
+          break;
+        }
+      }
+    }
+    for (const tile of state.tiles) this.lastTiles.set(`${tile.x},${tile.y}`, tile);
+    if (tilesDirty) this._buildTileLayer(state.tiles);
 
     this.lastDeposits.clear();
     for (const d of state.deposits ?? []) {
@@ -202,6 +249,8 @@ export class GameRenderer {
     // Add / update entity sprites
     const currentIds = new Set<string>();
     for (const entity of entities) {
+      // Core units hide inside their platform while attached
+      if (entity.kind === "unit" && entity.isShell) continue;
       currentIds.add(entity.id);
       const fp = this._getFootprint(entity);
 
@@ -219,6 +268,14 @@ export class GameRenderer {
       sprite.width = fp * TILE_SIZE;
       sprite.height = fp * TILE_SIZE;
 
+      if (entity.kind === "unit" && entity.manaShielded) {
+        sprite.tint = 0xa78bfa;
+        this.shieldTintedIds.add(entity.id);
+      } else if (this.shieldTintedIds.has(entity.id)) {
+        sprite.tint = 0xffffff;
+        this.shieldTintedIds.delete(entity.id);
+      }
+
       const fogVal = this._fogValueAt(entity.position.x, entity.position.y);
       sprite.visible = fogVal === 2 || (fogVal === 1 && entity.kind === "building");
     }
@@ -228,6 +285,7 @@ export class GameRenderer {
       if (!currentIds.has(id)) {
         sprite.destroy();
         this.entitySprites.delete(id);
+        this.shieldTintedIds.delete(id);
       }
     }
 
@@ -386,6 +444,7 @@ export class GameRenderer {
     canvas.addEventListener("pointermove", this._onPointerMove);
     canvas.addEventListener("pointerup", this._onPointerUp);
     canvas.addEventListener("pointerleave", this._onPointerLeave);
+    window.addEventListener("keydown", this._onKeyDownBuild);
   }
 
   private readonly _onContextMenu = (e: MouseEvent): void => {
@@ -432,6 +491,14 @@ export class GameRenderer {
       this.cameraX = this.dragStartCamX - (e.clientX - this.dragStartX);
       this.cameraY = this.dragStartCamY - (e.clientY - this.dragStartY);
       this._applyCamera();
+      return;
+    }
+    // Ghost placement tracking
+    if (this.buildMode) {
+      const world = this._screenToWorld(e.clientX, e.clientY);
+      this.ghostTileX = Math.floor(world.x / TILE_SIZE);
+      this.ghostTileY = Math.floor(world.y / TILE_SIZE);
+      this._renderGhost();
       return;
     }
     // Left-click rubber band
@@ -512,11 +579,18 @@ export class GameRenderer {
   }
 
   private _handleLeftClick(screenX: number, screenY: number): void {
+    if (this.buildMode) {
+      this.config.onBuildOrder?.(this.ghostTileX, this.ghostTileY);
+      this.buildMode = null;
+      this._clearGhost();
+      return;
+    }
+
     const world = this._screenToWorld(screenX, screenY);
     const tileX = world.x / TILE_SIZE;
     const tileY = world.y / TILE_SIZE;
 
-    const hit = this.lastEntities.find((e) => this._hitTest(e, tileX, tileY)) ?? null;
+    const hit = this.lastEntities.find((e) => !e.isShell && this._hitTest(e, tileX, tileY)) ?? null;
 
     if (hit) {
       const now = Date.now();
@@ -541,6 +615,11 @@ export class GameRenderer {
   }
 
   private _handleRightClick(screenX: number, screenY: number): void {
+    if (this.buildMode) {
+      this.buildMode = null;
+      this._clearGhost();
+      return;
+    }
     if (this.selectedIds.size === 0) return;
     // Only issue orders to friendly units
     const friendlyIds = [...this.selectedIds].filter((id) => {
@@ -562,8 +641,39 @@ export class GameRenderer {
     // Until capability filtering exists, all friendly units receive every order type
     // and the engine silently ignores orders the unit can't act on.
 
-    const hitEntity = this.lastEntities.find((e) => this._hitTest(e, tileX, tileY));
+    const hitEntity = this.lastEntities.find((e) => !e.isShell && this._hitTest(e, tileX, tileY));
     if (hitEntity && this._fogValueAt(hitEntity.position.x, hitEntity.position.y) === 2) {
+      // Builder right-clicking own under-construction building → resume construction
+      if (
+        hitEntity.faction === this.activeFaction &&
+        hitEntity.kind === "building" &&
+        hitEntity.buildingState === "underConstruction"
+      ) {
+        const builderIds = friendlyIds.filter((id) => {
+          const e = this.lastEntities.find((ent) => ent.id === id);
+          return e && (e.typeKey === "surf" || e.typeKey === "movableBuildKitPlatform");
+        });
+        if (builderIds.length > 0) {
+          this.config.onResumeConstructionOrder?.(builderIds, hitEntity.id);
+          return;
+        }
+      }
+      // Core right-clicking idle friendly platform → attach
+      if (
+        hitEntity.faction === this.activeFaction &&
+        hitEntity.kind === "unit" &&
+        ROBOT_PLATFORM_TYPES.has(hitEntity.typeKey) &&
+        !hitEntity.isShell
+      ) {
+        const coreIds = friendlyIds.filter((id) => {
+          const e = this.lastEntities.find((ent) => ent.id === id);
+          return e?.typeKey === "core" && !e.isShell;
+        });
+        if (coreIds.length === 1) {
+          this.config.onAttachOrder?.(coreIds[0]!, hitEntity.id);
+          return;
+        }
+      }
       if (hitEntity.faction !== this.activeFaction) {
         this.config.onAttackOrder?.(friendlyIds, hitEntity.id);
       } else if (hitEntity.id !== [...this.selectedIds][0]) {
@@ -601,6 +711,84 @@ export class GameRenderer {
     this.rubberBandGfx?.clear();
   }
 
+  private readonly _onKeyDownBuild = (e: KeyboardEvent): void => {
+    if (e.key === "Escape" && this.buildMode) {
+      this.buildMode = null;
+      this._clearGhost();
+    }
+  };
+
+  private _renderGhost(): void {
+    if (!this.ghostContainer || !this.buildMode) return;
+    const g = this.ghostContainer.children[0] as Graphics | undefined;
+    const gfx: Graphics = g ?? (() => {
+      const newGfx = new Graphics();
+      this.ghostContainer!.addChild(newGfx);
+      return newGfx;
+    })();
+    gfx.clear();
+
+    const { footprintTiles, typeKey } = this.buildMode;
+
+    // Check water-adjacency requirement
+    const needsWater = buildingRequiresAdjacentWater.has(typeKey);
+    let hasAdjacentWater = false;
+    if (needsWater) {
+      outer: for (let dy = 0; dy < footprintTiles; dy++) {
+        for (let dx = 0; dx < footprintTiles; dx++) {
+          const tx = this.ghostTileX + dx;
+          const ty = this.ghostTileY + dy;
+          for (const [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+            if (this.lastTiles.get(`${tx + ddx},${ty + ddy}`)?.terrain === "water") {
+              hasAdjacentWater = true;
+              break outer;
+            }
+          }
+        }
+      }
+    }
+    const waterCheckFails = needsWater && !hasAdjacentWater;
+
+    // Check if any building occupies a footprint tile
+    const occupiedTiles = new Set<string>();
+    for (const e of this.lastEntities) {
+      if (e.kind !== "building") continue;
+      const fp = this._getFootprint(e);
+      const bx = Math.floor(e.position.x);
+      const by = Math.floor(e.position.y);
+      for (let dy = 0; dy < fp; dy++) {
+        for (let dx = 0; dx < fp; dx++) {
+          occupiedTiles.add(`${bx + dx},${by + dy}`);
+        }
+      }
+    }
+
+    for (let dy = 0; dy < footprintTiles; dy++) {
+      for (let dx = 0; dx < footprintTiles; dx++) {
+        const tx = this.ghostTileX + dx;
+        const ty = this.ghostTileY + dy;
+        const tile = this.lastTiles.get(`${tx},${ty}`);
+        const hasDeposit = this.lastDeposits.has(`${tx},${ty}`);
+        const tileValid =
+          tile !== undefined &&
+          tile.terrain !== "water" &&
+          !hasDeposit &&
+          !occupiedTiles.has(`${tx},${ty}`) &&
+          !waterCheckFails;
+        gfx
+          .rect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+          .fill({ color: tileValid ? 0x00ff00 : 0xff0000, alpha: 0.25 });
+      }
+    }
+  }
+
+  private _clearGhost(): void {
+    if (!this.ghostContainer) return;
+    for (const child of this.ghostContainer.children) {
+      (child as Graphics).clear();
+    }
+  }
+
   private _fogValueAt(tileX: number, tileY: number): number {
     if (!this.lastFog) return 2; // no data yet — treat as visible
     const x = Math.floor(tileX);
@@ -621,6 +809,7 @@ export class GameRenderer {
     const maxY = Math.max(start.y, end.y);
     return this.lastEntities.filter((e) => {
       if (e.kind !== "unit" || e.faction !== this.activeFaction) return false;
+      if (e.attachedPlatformTypeKey || e.isShell) return false;
       const sx = (e.position.x + 0.5) * TILE_SIZE * zoom - this.cameraX;
       const sy = (e.position.y + 0.5) * TILE_SIZE * zoom - this.cameraY;
       return sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;
@@ -636,6 +825,11 @@ export class GameRenderer {
   }
 
   // ── Public controls ─────────────────────────────────────────────────────────
+
+  setBuildMode(mode: { typeKey: string; footprintTiles: number; faction: "wizards" | "robots" } | null): void {
+    this.buildMode = mode;
+    if (!mode) this._clearGhost();
+  }
 
   setZoom(zoomLevel: ZoomLevel): void {
     const idx = ZOOM_LEVELS.indexOf(zoomLevel);
@@ -657,6 +851,7 @@ export class GameRenderer {
 
   destroy(): void {
     this.destroyed = true;
+    window.removeEventListener("keydown", this._onKeyDownBuild);
     if (!this.initialized) {
       // init() is still in flight or never started — it will see destroyed=true and clean up
       return;

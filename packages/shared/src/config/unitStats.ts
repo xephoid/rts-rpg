@@ -338,8 +338,11 @@ export const thirdSpaceXpBoost = {
 };
 
 export const amphitheatreXpBoost = {
-  // Initial guess: each Amphitheatre contributes +10% XP; stacks additively, cap 3x.
+  // Initial guess: each Amphitheatre contributes +10% XP; stacks additively, cap 3x. (Phase 12)
   perBuilding: 0.1,
   stackingFormula: "additive" as const,
   cap: 3.0,
+  // Initial guess: 0.2 XP/sec passively for wizard units within radius.
+  xpPerSec: 0.2,
+  radiusTiles: 8,
 };
