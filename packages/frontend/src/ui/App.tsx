@@ -114,7 +114,7 @@ export function App() {
 
     const engine = new GameEngine({
       mapSize: mapSizeRef.current,
-      seed: 42,
+      seed: Math.floor(Math.random() * 2 ** 32),
       onTick: (state) => {
         pushGameState(state);
         renderer.render(state);
