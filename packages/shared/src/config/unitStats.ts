@@ -170,7 +170,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     capacity: 0,
     attackIntervalSec: 2.0, // Initial guess: slow heavy hitter
     canAttackAir: true,
-    footprintTiles: 4, // Initial guess: oversized chassis relative to basic platforms
+    footprintTiles: 2, // Initial guess: oversized chassis relative to basic platforms
   },
   probePlatform: {
     // Initial guess: fast scout — high sight, no attack.
@@ -281,7 +281,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     armor: 0,
     capacity: 0,
     attackIntervalSec: 2.0, // Initial guess: slow powerful breath
-    footprintTiles: 4, // Initial guess: massive winged unit
+    footprintTiles: 2, // Initial guess: massive winged unit
   },
   enchantress: {
     // Initial guess: buff/debuff specialist — low direct damage.
