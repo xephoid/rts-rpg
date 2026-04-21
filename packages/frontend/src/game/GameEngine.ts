@@ -2930,8 +2930,20 @@ export class GameEngine {
           for (const d of detectors) {
             const dx = t.position.x - d.position.x;
             const dy = t.position.y - d.position.y;
-            if (dx * dx + dy * dy <= d.stats.sightRange * d.stats.sightRange) {
+            const dSq = dx * dx + dy * dy;
+            if (dSq <= d.stats.sightRange * d.stats.sightRange) {
               set.add(t.id);
+              // Dev diagnostic: log detector + target + distance so balance-tuning
+              // playtesters can verify the detection radius matches config. Fires
+              // only on the transition (matches the owner-alert below).
+              if (!this._previousDetectedIds[viewer].has(t.id)) {
+                // eslint-disable-next-line no-console
+                console.log(
+                  `[detect] ${d.typeKey}(${d.id}) @ (${d.position.x},${d.position.y}) ` +
+                  `sightRange=${d.stats.sightRange} revealed ${t.typeKey}(${t.id}) ` +
+                  `@ (${t.position.x},${t.position.y}) — dist=${Math.sqrt(dSq).toFixed(2)}`,
+                );
+              }
               break;
             }
           }
