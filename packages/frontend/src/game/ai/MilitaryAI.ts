@@ -26,6 +26,8 @@ import {
   wizardBuildingCosts,
   wizardBuildingStats,
   resourceDropoffBuildings,
+  HIDING_CAPABLE_BUILDINGS,
+  hidingBuildingConfig,
   TICKS_PER_SEC,
 } from "@neither/shared";
 import type { Entity } from "../entities/Entity.js";
@@ -52,6 +54,7 @@ export interface AIEngineInterface {
   issueAttachOrder(coreId: string, platformId: string): void;
   issueGarrisonOrder(unitId: string, towerId: string): void;
   issueEnterPlatformOrder(coreId: string, platformId: string): void;
+  issueHideOrder(unitId: string, buildingId: string): void;
 }
 
 // ── Faction roles ───────────────────────────────────────────────────────────
@@ -310,6 +313,11 @@ export class MilitaryAI {
     } else {
       this._garrisonWizardTowers(engine, ctx);
     }
+
+    // Always-on: keep the named leader safely tucked inside a hiding-capable
+    // building. Cheap insurance against assassination / Military Victory loss —
+    // the leader contributes population + charisma either way, no real downside.
+    this._hideLeader(engine, ctx);
 
     if (!this.hasScouted && tick >= SCOUT_DELAY_TICKS) {
       this._scout(engine, ctx);
@@ -937,6 +945,33 @@ export class MilitaryAI {
   }
 
   // ── Wizard tower garrison ────────────────────────────────────────────────
+
+  /** Send the named leader into a friendly hiding-capable building whenever it's
+   *  outside and idle. Ignores leaders that are already on the move, mid-action, or
+   *  already hidden. If no building has capacity the leader just stays put. */
+  private _hideLeader(engine: AIEngineInterface, ctx: Ctx): void {
+    const leaderTypeKey = namedLeaders[this.faction].typeKey;
+    const leader = ctx.units.find((u) => u.typeKey === leaderTypeKey);
+    if (!leader) return;
+    if (leader.state.kind !== "idle") return;
+    // Skip if already in a container (hiding, garrisoned, attached to a platform, etc.)
+    if (
+      leader.state.kind !== "idle" ||
+      (leader as unknown as { attachedPlatformId?: string | null }).attachedPlatformId
+    ) return;
+
+    const shelter = ctx.buildings.find(
+      (b) =>
+        HIDING_CAPABLE_BUILDINGS.has(b.typeKey) &&
+        b.isOperational &&
+        b.faction === this.faction &&
+        b.occupantIds.size < hidingBuildingConfig.hiddenCapacityOverride,
+    );
+    if (!shelter) return;
+
+    engine.issueHideOrder(leader.id, shelter.id);
+    this._log(`hide leader ${leader.id} in ${shelter.typeKey} ${shelter.id}`);
+  }
 
   private _garrisonWizardTowers(engine: AIEngineInterface, ctx: Ctx): void {
     const defenseKey = FACTION_ROLES[this.faction].defense;

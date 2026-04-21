@@ -426,8 +426,14 @@ export class GameRenderer {
 
   private _entityCenter(entityId: string, fallbackPos: { x: number; y: number }): { x: number; y: number } {
     const entity = this.lastEntities.find((e) => e.id === entityId);
-    const fp = entity ? this._getFootprint(entity) : 1;
     const pos = entity ? entity.position : fallbackPos;
+    // Buildings anchor at top-left of their fp×fp footprint, so center = pos + fp/2.
+    // Units occupy a 1×1 collision tile regardless of rendered footprint (the sprite
+    // is centered on tile-centre for fp > 1), so center = pos + 0.5 always.
+    if (entity && entity.kind === "unit") {
+      return { x: (pos.x + 0.5) * TILE_SIZE, y: (pos.y + 0.5) * TILE_SIZE };
+    }
+    const fp = entity ? this._getFootprint(entity) : 1;
     return { x: (pos.x + fp / 2) * TILE_SIZE, y: (pos.y + fp / 2) * TILE_SIZE };
   }
 

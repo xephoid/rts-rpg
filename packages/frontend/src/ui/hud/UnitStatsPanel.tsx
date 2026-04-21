@@ -242,6 +242,22 @@ export function UnitStatsPanel() {
           })()
         )}
 
+        {entity.kind === "building" && (entity.typeKey === "cottage" || entity.typeKey === "rechargeStation") && entity.buildingState !== "underConstruction" && (
+          (() => {
+            const hidden = gameState.entities.filter(
+              (e) => e.kind === "unit" && e.hidden && e.containingBuildingId === entity.id,
+            );
+            if (hidden.length === 0) {
+              return <div className={styles.buildingIdle}>Empty</div>;
+            }
+            return (
+              <div className={styles.buildingIdle}>
+                Hiding: {hidden.map((h) => h.name ?? formatTypeKey(h.typeKey)).join(", ")}
+              </div>
+            );
+          })()
+        )}
+
         {entity.kind === "building" && entity.buildingState !== "underConstruction" && entity.buildingState !== "researching" && (
           entity.productionProgress ? (
             <>
