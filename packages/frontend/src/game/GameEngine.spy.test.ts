@@ -841,6 +841,95 @@ describe("Combat targeting filter", () => {
     expect(inf.stats.hp).toBe(inf.stats.maxHp);
   });
 
+  it("Core attached to disguised Infiltrator does NOT leak through detection", () => {
+    const engine = makeEngine();
+
+    // Spawn infiltrator with a core "attached" (mirrors the live combined-unit state).
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const inf = spawnInfiltrator(engine, open);
+
+    const cStats = robotUnitStats.core!;
+    const core = new UnitEntity({
+      faction: "robots",
+      typeKey: "core",
+      position: { ...inf.position },
+      stats: {
+        maxHp: cStats.hpWood, damage: cStats.damage,
+        attackRange: cStats.attackRange, sightRange: cStats.sightRange,
+        speed: cStats.speed, charisma: cStats.charisma,
+        armor: cStats.armorWood, capacity: cStats.capacity,
+      },
+    });
+    engine.entities.add(core);
+    core.state = { kind: "platformShell" };
+    core.attachedPlatformId = inf.id;
+    core.attachedPlatformTypeKey = inf.typeKey;
+    inf.attachedCoreId = core.id;
+
+    engine.issueDisguise(inf.id, "evoker");
+
+    const eStats = wizardUnitStats.evoker!;
+    const wizardShooter = new UnitEntity({
+      faction: "wizards",
+      typeKey: "evoker",
+      position: { x: open.x + 2, y: open.y },
+      stats: {
+        maxHp: eStats.hp, damage: eStats.damage,
+        attackRange: eStats.attackRange, sightRange: eStats.sightRange,
+        speed: eStats.speed, charisma: eStats.charisma,
+        armor: eStats.armor, capacity: eStats.capacity,
+      },
+    });
+    engine.entities.add(wizardShooter);
+
+    for (let t = 0; t < 30; t++) engine.stepTick(t, t * 16);
+    expect(wizardShooter.state.kind).toBe("idle");
+    expect(inf.stats.hp).toBe(inf.stats.maxHp);
+    expect(core.stats.hp).toBe(core.stats.maxHp);
+  });
+
+  it("enchantress within range reveals the Core-driven disguise", () => {
+    const engine = makeEngine();
+
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const inf = spawnInfiltrator(engine, open);
+    engine.issueDisguise(inf.id, "evoker");
+
+    // Enchantress detector within sightRange.
+    const enStats = wizardUnitStats.enchantress!;
+    const enchantress = new UnitEntity({
+      faction: "wizards",
+      typeKey: "enchantress",
+      position: { x: open.x + 3, y: open.y },
+      stats: {
+        maxHp: enStats.hp, damage: enStats.damage,
+        attackRange: enStats.attackRange, sightRange: enStats.sightRange,
+        speed: enStats.speed, charisma: enStats.charisma,
+        armor: enStats.armor, capacity: enStats.capacity,
+      },
+    });
+    engine.entities.add(enchantress);
+
+    // Nearby Evoker that should now auto-aggro once the detector reveals the infiltrator.
+    const eStats = wizardUnitStats.evoker!;
+    const attacker = new UnitEntity({
+      faction: "wizards",
+      typeKey: "evoker",
+      position: { x: open.x + 2, y: open.y },
+      stats: {
+        maxHp: eStats.hp, damage: eStats.damage,
+        attackRange: eStats.attackRange, sightRange: eStats.sightRange,
+        speed: eStats.speed, charisma: eStats.charisma,
+        armor: eStats.armor, capacity: eStats.capacity,
+      },
+    });
+    engine.entities.add(attacker);
+
+    for (let t = 0; t < 30; t++) engine.stepTick(t, t * 16);
+    // Attacker should have engaged once the enchantress's detector set kicked in.
+    expect(inf.stats.hp).toBeLessThan(inf.stats.maxHp);
+  });
+
   it("0-damage units (workers, civilians, healers) refuse attack orders + skip auto-aggro", () => {
     const engine = makeEngine();
     const cleric = wizardUnitStats.cleric!;
