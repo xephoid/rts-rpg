@@ -813,6 +813,73 @@ describe("Combat targeting filter", () => {
     expect(il.stats.hp).toBe(il.stats.maxHp);
   });
 
+  it("auto-aggro skips a disguised enemy not in detector set", () => {
+    const engine = makeEngine();
+
+    // Robot infiltration platform disguises as an evoker, parks next to a wizard
+    // evoker. No detector on the wizard side — wizard auto-aggro must ignore.
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const inf = spawnInfiltrator(engine, open);
+    engine.issueDisguise(inf.id, "evoker");
+
+    const eStats = wizardUnitStats.evoker!;
+    const wizardShooter = new UnitEntity({
+      faction: "wizards",
+      typeKey: "evoker",
+      position: { x: open.x + 2, y: open.y },
+      stats: {
+        maxHp: eStats.hp, damage: eStats.damage,
+        attackRange: eStats.attackRange, sightRange: eStats.sightRange,
+        speed: eStats.speed, charisma: eStats.charisma,
+        armor: eStats.armor, capacity: eStats.capacity,
+      },
+    });
+    engine.entities.add(wizardShooter);
+
+    for (let t = 0; t < 30; t++) engine.stepTick(t, t * 16);
+    expect(wizardShooter.state.kind).toBe("idle");
+    expect(inf.stats.hp).toBe(inf.stats.maxHp);
+  });
+
+  it("0-damage units (workers, civilians, healers) refuse attack orders + skip auto-aggro", () => {
+    const engine = makeEngine();
+    const cleric = wizardUnitStats.cleric!;
+    const healer = new UnitEntity({
+      faction: "wizards",
+      typeKey: "cleric",
+      position: { x: 10, y: 10 },
+      stats: {
+        maxHp: cleric.hp, damage: cleric.damage, // 0
+        attackRange: cleric.attackRange, sightRange: cleric.sightRange,
+        speed: cleric.speed, charisma: cleric.charisma,
+        armor: cleric.armor, capacity: cleric.capacity,
+      },
+    });
+    engine.entities.add(healer);
+
+    const sStats = robotUnitStats.spitterPlatform!;
+    const enemy = new UnitEntity({
+      faction: "robots",
+      typeKey: "spitterPlatform",
+      position: { x: 11, y: 10 },
+      stats: {
+        maxHp: sStats.hpWood, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armorWood, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(enemy);
+
+    // Manual attack order should be rejected outright.
+    engine.issueAttackOrder(healer.id, enemy.id);
+    expect(healer.state.kind).toBe("idle");
+
+    // Auto-aggro also skips over the 0-damage unit.
+    for (let t = 0; t < 30; t++) engine.stepTick(t, t * 16);
+    expect(healer.state.kind === "attacking").toBe(false);
+  });
+
   it("manually issued attack against invisible enemy drops to idle", () => {
     const engine = makeEngine();
     engine.grantResearch("wizards", "invisibility");

@@ -481,6 +481,9 @@ export class GameEngine {
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
     if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
+    // Non-combatants (workers, civilians, Cleric, Enchantress, Surf…) can't attack.
+    // Reject the order outright so the unit doesn't chase a target it can never hit.
+    if (unit.stats.damage <= 0) return;
     const targetEntity = this.entities.get(targetId);
     if (!targetEntity) return;
     if (targetEntity.kind === "unit") {
@@ -2131,6 +2134,10 @@ export class GameEngine {
       // that died earlier in this pass would otherwise keep swinging from the grave.
       if (unit.stats.hp <= 0 || !this.entities.has(unit.id)) continue;
       if (unit.state.kind !== "attacking") continue;
+      // Non-combatants can't be in `attacking` via `issueAttackOrder` (blocked there),
+      // but a level-down or future debuff could drop damage to 0 mid-engagement —
+      // drop the state instead of chasing forever at 0 output.
+      if (unit.stats.damage <= 0) { unit.state = { kind: "idle" }; continue; }
       const state = unit.state;
 
       if (unit.attackCooldownTicks > 0) unit.attackCooldownTicks--;
@@ -2216,6 +2223,7 @@ export class GameEngine {
     for (const unit of this.entities.units()) {
       if (unit.stats.hp <= 0 || !this.entities.has(unit.id)) continue;
       if (unit.state.kind !== "idle") continue;
+      if (unit.stats.damage <= 0) continue; // workers, civilians, healers — not combat
       if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) continue; // unattached platforms don't auto-aggro
       for (const entity of this.entities.all()) {
         if (entity.faction === unit.faction) continue;
