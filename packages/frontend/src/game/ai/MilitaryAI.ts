@@ -19,6 +19,8 @@ import type { Faction, Vec2 } from "@neither/shared";
 import {
   aiParameters,
   buildingProduction,
+  buildingResearch,
+  researchCosts,
   namedLeaders,
   robotBuildingCosts,
   robotBuildingStats,
@@ -55,6 +57,7 @@ export interface AIEngineInterface {
   issueGarrisonOrder(unitId: string, towerId: string): void;
   issueEnterPlatformOrder(coreId: string, platformId: string): void;
   issueHideOrder(unitId: string, buildingId: string): void;
+  issueResearchOrder(buildingId: string, researchKey: string): void;
 }
 
 // ── Faction roles ───────────────────────────────────────────────────────────
@@ -90,6 +93,10 @@ interface FactionRoles {
   /** Optional wood-storage drop-off (logCabin / woodStorage). Built near far wood
    *  deposits so gatherers don't walk home every trip. */
   woodStorage: string | null;
+  /** Research items the AI should prioritise (in order) once the relevant building
+   *  is operational. Robots lean on material upgrades; wizards stack combat spells +
+   *  Mana Shield. Order matters — earlier items are attempted first each tick. */
+  researchPriority: readonly string[];
 }
 
 const FACTION_ROLES: Record<Faction, FactionRoles> = {
@@ -105,6 +112,8 @@ const FACTION_ROLES: Record<Faction, FactionRoles> = {
     autoBuilt: ["castle"],
     bootstrapFactory: null,
     woodStorage: "logCabin",
+    // Shield + AoE first (defensive backbone), then direct damage + buffs/debuffs.
+    researchPriority: ["manaShield", "iceBlast", "fieryExplosion", "strengthenAlly", "weakenFoe"],
   },
   robots: {
     home: "home",
@@ -118,6 +127,9 @@ const FACTION_ROLES: Record<Faction, FactionRoles> = {
     autoBuilt: ["home", "combatFrameProduction"],
     bootstrapFactory: "combatFrameProduction",
     woodStorage: "woodStorage",
+    // Material upgrade is the only home-level research today and the faction's
+    // single biggest power spike, so it's the whole list for now.
+    researchPriority: ["woodToMetal"],
   },
 };
 
@@ -150,6 +162,10 @@ const MAX_DEFENSIVE_BUILDINGS = 3;
 /** Defensive reserves sized to cover one tower (wizardTower 60/20, ICP 70/10) + buffer. */
 const DEFENSE_WOOD_RESERVE = 80;
 const DEFENSE_WATER_RESERVE = 30;
+/** Minimum resources to keep on hand AFTER paying a research cost, so combat
+ *  production isn't starved the moment the AI commits to an upgrade. */
+const RESEARCH_WOOD_BUFFER = 60;
+const RESEARCH_WATER_BUFFER = 30;
 /** Enter turtle when enemy units near home exceed own army by this factor. */
 const TURTLE_THREAT_MULT = 1.5;
 /** Retreat combat units whose HP fraction drops below this. */
@@ -299,6 +315,10 @@ export class MilitaryAI {
       this._buildDefenses(engine, ctx);
       this._buildTechUnlocks(engine, ctx);
     }
+    // Research-item priority runs in every mode — items are cheap relative to the
+    // whole-match payoff (woodToMetal doubles HP; Mana Shield halves damage), so
+    // delaying them until post-economy is a net DPS loss on the AI side.
+    this._advanceResearchPriority(engine, ctx);
 
     // Combat production + rally/attack.
     switch (this.mode) {
@@ -574,6 +594,11 @@ export class MilitaryAI {
     const homes = ctx.buildings.filter((b) => b.typeKey === roles.home && b.isOperational);
     const gathererSet = new Set(roles.gatherers);
     const hasBuilder = ctx.units.some((u) => u.typeKey === roles.builder);
+    // If a home-hosted research is queued to start this tick, pause non-critical
+    // production so the home can drain its queue and transition to idle. Without
+    // this, the home is perpetually in `producing` state and the engine rejects
+    // the research request forever.
+    const pendingResearchAtHome = this._hasPendingResearchAt(roles.home, ctx);
 
     // Per-gatherer live counts (keyed by typeKey).
     const gathererCount: Record<string, number> = {};
@@ -616,6 +641,10 @@ export class MilitaryAI {
       // 3. Thin Core pipeline fills remaining slots up to PROD_QUEUE_DEPTH - 1,
       //    but only while the free-core reserve is low.
       if (!coreQueueOk) continue;
+      // Pause Core topping-up when a home-hosted research is about to fire — the
+      // engine rejects `issueResearchOrder` whenever the building isn't idle, so we
+      // need the queue to actually drain before `_advanceResearchPriority` runs.
+      if (pendingResearchAtHome) continue;
       for (let i = _totalQueued(h); i < PROD_QUEUE_DEPTH - 1; i++) {
         engine.issueProductionOrder(h.id, roles.civilian);
       }
@@ -814,6 +843,64 @@ export class MilitaryAI {
       this._wizardBuild(engine, ctx, typeKey);
     } else {
       this._robotBuild(engine, ctx, typeKey);
+    }
+  }
+
+  /** True when `_advanceResearchPriority` *would* fire against a building of the
+   *  given host typeKey this tick — used by maintenance logic to pause non-critical
+   *  queueing on that host so its queue drains and research can actually start. */
+  private _hasPendingResearchAt(hostTypeKey: string, ctx: Ctx): boolean {
+    const roles = FACTION_ROLES[this.faction];
+    for (const researchKey of roles.researchPriority) {
+      const cost = researchCosts[researchKey as keyof typeof researchCosts];
+      if (!cost) continue;
+      const hostForItem = Object.keys(buildingResearch).find(
+        (btk) => buildingResearch[btk]!.includes(researchKey),
+      );
+      if (hostForItem !== hostTypeKey) continue;
+      const alreadyHave = ctx.buildings.some(
+        (b) =>
+          b.typeKey === hostTypeKey &&
+          (b.state.kind === "researching" && b.state.researchKey === researchKey),
+      );
+      if (alreadyHave) return false;
+      if (ctx.resources.wood < cost.wood + RESEARCH_WOOD_BUFFER) continue;
+      if (ctx.resources.water < cost.water + RESEARCH_WATER_BUFFER) continue;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Walk `FACTION_ROLES.researchPriority` and kick off the first item whose host
+   * building is operational, not already researching, and whose cost fits our
+   * resource buffers. Issues at most one research per tick so combat production
+   * isn't repeatedly stalled by research spending. Items already completed or
+   * mid-research are skipped automatically by the engine's `issueResearchOrder`.
+   */
+  private _advanceResearchPriority(engine: AIEngineInterface, ctx: Ctx): void {
+    const roles = FACTION_ROLES[this.faction];
+    for (const researchKey of roles.researchPriority) {
+      const cost = researchCosts[researchKey as keyof typeof researchCosts];
+      if (!cost) continue;
+      // Skip items already completed (the engine would no-op anyway; skip here to
+      // avoid iterating the building list unnecessarily).
+      const hostTypeKey = Object.keys(buildingResearch).find(
+        (btk) => buildingResearch[btk]!.includes(researchKey),
+      );
+      if (!hostTypeKey) continue;
+
+      const host = ctx.buildings.find(
+        (b) => b.typeKey === hostTypeKey && b.isOperational && b.state.kind === "operational",
+      );
+      if (!host) continue;
+
+      if (ctx.resources.wood < cost.wood + RESEARCH_WOOD_BUFFER) continue;
+      if (ctx.resources.water < cost.water + RESEARCH_WATER_BUFFER) continue;
+
+      engine.issueResearchOrder(host.id, researchKey);
+      this._log(`research ${researchKey} at ${hostTypeKey} ${host.id}`);
+      return; // one research per tick
     }
   }
 
