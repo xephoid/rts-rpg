@@ -3,7 +3,7 @@
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
 import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot, AttackEvent, SpellEvent } from "@neither/shared";
-import { robotBuildingStats, wizardBuildingStats, buildingRequiresAdjacentWater } from "@neither/shared";
+import { robotBuildingStats, wizardBuildingStats, robotUnitStats, wizardUnitStats, buildingRequiresAdjacentWater } from "@neither/shared";
 import {
   terrainAssets,
   unitSpritePath,
@@ -369,12 +369,25 @@ export class GameRenderer {
   }
 
   private _getFootprint(entity: EntitySnapshot): number {
-    if (entity.kind !== "building") return 1;
-    const stats =
+    if (entity.kind === "building") {
+      const stats =
+        entity.faction === "wizards"
+          ? wizardBuildingStats[entity.typeKey]
+          : robotBuildingStats[entity.typeKey];
+      return stats?.footprintTiles ?? 2;
+    }
+    const unitStats =
       entity.faction === "wizards"
-        ? wizardBuildingStats[entity.typeKey]
-        : robotBuildingStats[entity.typeKey];
-    return stats?.footprintTiles ?? 2;
+        ? wizardUnitStats[entity.typeKey]
+        : robotUnitStats[entity.typeKey];
+    return unitStats?.footprintTiles ?? 1;
+  }
+
+  /** True while a unit is tucked inside a container (tower, platform, cottage, etc.)
+   *  and must not appear in any selection, hit-test, or right-click routing. */
+  private _isInsideContainer(e: EntitySnapshot): boolean {
+    if (e.kind !== "unit") return false;
+    return !!(e.isShell || e.garrisoned || e.inPlatform || e.hidden || e.inEnemyBuilding);
   }
 
   /** An enemy unit that is invisible and NOT in our detector-reveal set is unclickable
@@ -526,13 +539,10 @@ export class GameRenderer {
     // Add / update entity sprites
     const currentIds = new Set<string>();
     for (const entity of entities) {
-      // Hide units that are tucked inside a carrier:
-      //  - isShell        → Core attached to a mobile platform (robot combined unit)
-      //  - garrisoned     → unit inside a Wizard Tower
-      //  - inPlatform     → Core inside an Immobile Combat Platform
-      //  - hidden         → civilian/leader hiding in friendly Cottage/Recharge Station
-      //  - inEnemyBuilding→ Infiltration Platform occupying an enemy Cottage/Recharge Station
-      if (entity.kind === "unit" && (entity.isShell || entity.garrisoned || entity.inPlatform || entity.hidden || entity.inEnemyBuilding)) continue;
+      // Skip units tucked inside a container (tower garrison, mobile-platform Core,
+      // ICP occupancy, Cottage/Recharge Station hiders, Infiltration Platform inside
+      // an enemy building). They're unselectable, unhittable, and have no sprite.
+      if (this._isInsideContainer(entity)) continue;
 
       // Spy visibility filter — opposing faction:
       //   invisible illusionist not in detector reveal set → skip rendering entirely.
@@ -567,8 +577,16 @@ export class GameRenderer {
         this.spriteKeyCache.set(entity.id, currentKey);
       }
 
-      sprite.x = entity.position.x * TILE_SIZE;
-      sprite.y = entity.position.y * TILE_SIZE;
+      // Buildings render top-left-anchored at their position. Units occupy a single
+      // collision tile (position = tile origin); for fp > 1 we centre the sprite on
+      // the unit's tile centre so the expanded visual straddles the surrounding tiles.
+      if (entity.kind === "unit" && fp > 1) {
+        sprite.x = (entity.position.x + 0.5 - fp / 2) * TILE_SIZE;
+        sprite.y = (entity.position.y + 0.5 - fp / 2) * TILE_SIZE;
+      } else {
+        sprite.x = entity.position.x * TILE_SIZE;
+        sprite.y = entity.position.y * TILE_SIZE;
+      }
       sprite.width = fp * TILE_SIZE;
       sprite.height = fp * TILE_SIZE;
 
@@ -627,10 +645,12 @@ export class GameRenderer {
     if (!this.selectionGfx) return;
     const fp = this._getFootprint(entity);
     if (entity.kind === "unit") {
+      // Ring always hugs the unit's tile centre; radius scales with footprint so
+      // 4x4 units (dragon / large combat platform) get a correspondingly bigger halo.
       const cx = (entity.position.x + 0.5) * TILE_SIZE;
       const cy = (entity.position.y + 0.5) * TILE_SIZE;
       this.selectionGfx
-        .circle(cx, cy, TILE_SIZE * 0.44)
+        .circle(cx, cy, TILE_SIZE * 0.44 * fp)
         .stroke({ color: 0xffffff, width: 2, alpha: 0.9 });
     } else {
       const px = entity.position.x * TILE_SIZE - 2;
@@ -947,6 +967,20 @@ export class GameRenderer {
       const cy = entity.position.y + 0.5;
       return (cx - tileX) ** 2 + (cy - tileY) ** 2 < 0.6 ** 2;
     }
+    // Buildings anchor at top-left (position is footprint origin). Units anchor at
+    // their collision tile centre and render with a sprite centred on it — so the
+    // hit box for an fp>1 unit straddles the neighbouring tiles.
+    if (entity.kind === "unit") {
+      const half = fp / 2;
+      const cx = entity.position.x + 0.5;
+      const cy = entity.position.y + 0.5;
+      return (
+        tileX >= cx - half &&
+        tileX < cx + half &&
+        tileY >= cy - half &&
+        tileY < cy + half
+      );
+    }
     return (
       tileX >= entity.position.x &&
       tileX < entity.position.x + fp &&
@@ -973,13 +1007,13 @@ export class GameRenderer {
       if (kind === "fieryExplosion") {
         this.config.onSpellTargetGround?.(casterId, kind, { x: tileX, y: tileY });
       } else {
-        const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && !e.hidden && !e.inEnemyBuilding && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
+        const hit = this.lastEntities.find((e) => !this._isInsideContainer(e) && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
         if (hit) this.config.onSpellTargetUnit?.(casterId, kind, hit.id);
       }
       return;
     }
 
-    const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && !e.hidden && !e.inEnemyBuilding && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
+    const hit = this.lastEntities.find((e) => !this._isInsideContainer(e) && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
 
     if (hit) {
       const now = Date.now();
@@ -1031,7 +1065,7 @@ export class GameRenderer {
     // and the engine silently ignores orders the unit can't act on.
 
     const hitEntity = this.lastEntities.find(
-      (e) => !e.isShell && !e.garrisoned && !e.inPlatform && !e.hidden && !e.inEnemyBuilding && this._isHitVisible(e) && this._hitTest(e, tileX, tileY),
+      (e) => !this._isInsideContainer(e) && this._isHitVisible(e) && this._hitTest(e, tileX, tileY),
     );
     if (hitEntity && this._fogValueAt(hitEntity.position.x, hitEntity.position.y) === 2) {
       // Builder right-clicking own under-construction building → resume construction
@@ -1295,8 +1329,8 @@ export class GameRenderer {
     const maxY = Math.max(start.y, end.y);
     return this.lastEntities.filter((e) => {
       if (e.kind !== "unit" || e.faction !== this.activeFaction) return false;
-      if (e.attachedPlatformTypeKey || e.isShell) return false;
-      if (e.garrisoned || e.inPlatform) return false;
+      if (e.attachedPlatformTypeKey) return false; // Core riding a platform — platform is the selection target
+      if (this._isInsideContainer(e)) return false;
       const sx = (e.position.x + 0.5) * TILE_SIZE * zoom - this.cameraX;
       const sy = (e.position.y + 0.5) * TILE_SIZE * zoom - this.cameraY;
       return sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;

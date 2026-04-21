@@ -131,6 +131,7 @@ export const robotUnitStats = {
         capacity: 0,
         attackIntervalSec: 2.0, // Initial guess: slow heavy hitter
         canAttackAir: true,
+        footprintTiles: 4, // Initial guess: oversized chassis relative to basic platforms
     },
     probePlatform: {
         // Initial guess: fast scout — high sight, no attack.
@@ -239,6 +240,7 @@ export const wizardUnitStats = {
         armor: 0,
         capacity: 0,
         attackIntervalSec: 2.0, // Initial guess: slow powerful breath
+        footprintTiles: 4, // Initial guess: massive winged unit
     },
     enchantress: {
         // Initial guess: buff/debuff specialist — low direct damage.

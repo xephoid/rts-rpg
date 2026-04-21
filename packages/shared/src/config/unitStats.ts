@@ -13,6 +13,9 @@ export type UnitStatBlock = {
   armorMetal: number;
   capacity: number; // resource carry capacity
   attackIntervalSec: number; // seconds between attacks
+  /** Visual + selection footprint in tiles. Collision is still 1x1 — renderer scales
+   *  the sprite and the hit-test box but the unit occupies a single tile for pathing. */
+  footprintTiles?: number;
   flying?: boolean; // ignores terrain + building tiles; collides only with other flyers
   canAttackAir?: boolean; // can target flying units
   cannotBeConverted?: boolean; // immune to Talk/Convert actions
@@ -28,6 +31,8 @@ export type WizardStatBlock = {
   armor: number;
   capacity: number;
   attackIntervalSec: number; // seconds between attacks
+  /** Visual + selection footprint in tiles. Collision is still 1x1. */
+  footprintTiles?: number;
   flying?: boolean;
   canAttackAir?: boolean;
   cannotBeConverted?: boolean; // immune to Talk/Convert actions
@@ -165,6 +170,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     capacity: 0,
     attackIntervalSec: 2.0, // Initial guess: slow heavy hitter
     canAttackAir: true,
+    footprintTiles: 4, // Initial guess: oversized chassis relative to basic platforms
   },
   probePlatform: {
     // Initial guess: fast scout — high sight, no attack.
@@ -275,6 +281,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     armor: 0,
     capacity: 0,
     attackIntervalSec: 2.0, // Initial guess: slow powerful breath
+    footprintTiles: 4, // Initial guess: massive winged unit
   },
   enchantress: {
     // Initial guess: buff/debuff specialist — low direct damage.

@@ -1215,7 +1215,7 @@ export class GameEngine {
         if (e.kind === "unit" && (e as UnitEntity).isFlying && !unit.canAttackAir) continue;
         if (!this._isTargetableBy(e, unit.faction)) continue;
         const d = Math.hypot(e.position.x - unit.position.x, e.position.y - unit.position.y);
-        if (d <= effectiveRange && d < bestDist) { bestDist = d; bestTarget = e; }
+        if (d <= effectiveRange + this._targetSizeRangeBonus(e) && d < bestDist) { bestDist = d; bestTarget = e; }
       }
       if (!bestTarget) continue;
 
@@ -1288,7 +1288,7 @@ export class GameEngine {
         }
         if (!this._isTargetableBy(e, platform.faction)) continue;
         const d = Math.hypot(e.position.x - platform.position.x, e.position.y - platform.position.y);
-        if (d <= attackRange && d < bestDist) { bestDist = d; bestTarget = e; }
+        if (d <= attackRange + this._targetSizeRangeBonus(e) && d < bestDist) { bestDist = d; bestTarget = e; }
       }
       if (!bestTarget) continue;
 
@@ -2158,8 +2158,9 @@ export class GameEngine {
       const dx = target.position.x - unit.position.x;
       const dy = target.position.y - unit.position.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
+      const effectiveRange = unit.stats.attackRange + this._targetSizeRangeBonus(target);
 
-      if (dist > unit.stats.attackRange) {
+      if (dist > effectiveRange) {
         // Not in range — compute chase path if not already chasing
         if (state.path.length === 0) {
           const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
@@ -2228,7 +2229,7 @@ export class GameEngine {
         const dx = entity.position.x - unit.position.x;
         const dy = entity.position.y - unit.position.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist <= unit.stats.attackRange) {
+        if (dist <= unit.stats.attackRange + this._targetSizeRangeBonus(entity)) {
           unit.state = { kind: "attacking", targetId: entity.id, path: [], yieldTicks: 0 };
           break;
         }
@@ -2952,6 +2953,27 @@ export class GameEngine {
       return this._detectedIdsThisTick[attackerFaction].has(u.id);
     }
     return true;
+  }
+
+  /** A large (>1 footprint) unit extends past its collision tile. Attackers get a
+   *  range bonus equal to half the target's footprint-minus-one so the effective
+   *  engagement edge matches the rendered sprite edge. Buildings use their own
+   *  `footprintTiles` in the same way. */
+  private _targetSizeRangeBonus(target: Entity): number {
+    if (target.kind === "unit") {
+      const t = target as UnitEntity;
+      const stats = t.faction === "wizards"
+        ? wizardUnitStats[t.typeKey]
+        : robotUnitStats[t.typeKey];
+      const fp = stats?.footprintTiles ?? 1;
+      return Math.max(0, (fp - 1) * 0.5);
+    }
+    const b = target as BuildingEntity;
+    const stats = b.faction === "wizards"
+      ? wizardBuildingStats[b.typeKey]
+      : robotBuildingStats[b.typeKey];
+    const fp = stats?.footprintTiles ?? 1;
+    return Math.max(0, (fp - 1) * 0.5);
   }
 
   private _updateFog(tick: number): void {

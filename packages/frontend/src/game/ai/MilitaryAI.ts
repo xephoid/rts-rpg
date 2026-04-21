@@ -461,10 +461,14 @@ export class MilitaryAI {
     this._maybeBuildWoodStorage(engine, ctx);
   }
 
-  /** Build a wood-storage drop-off when the farthest-from-home wood deposit is too
-   *  far for an efficient round-trip. The storage serves as an intermediate drop
-   *  point so gatherers don't have to walk all the way back to home. Capped at
-   *  `MAX_WOOD_STORAGE` to prevent over-building. */
+  /** Build a wood-storage drop-off to bring a distant wood deposit into efficient
+   *  round-trip range. Only triggers when:
+   *    1. A gatherer is currently working (or heading to) a deposit whose nearest
+   *       existing drop-off is already past `WOOD_STORAGE_MIN_DIST`. Without this
+   *       gate the AI places storage pre-emptively at the farthest deposit even
+   *       when plenty of close wood remains — wasting build time + kit capacity.
+   *    2. That far deposit still has meaningful quantity remaining.
+   *  Capped at `MAX_WOOD_STORAGE` to prevent the AI from carpeting the map. */
   private _maybeBuildWoodStorage(engine: AIEngineInterface, ctx: Ctx): void {
     const roles = FACTION_ROLES[this.faction];
     const storageKey = roles.woodStorage;
@@ -483,11 +487,25 @@ export class MilitaryAI {
     }
     if (drops.length === 0) return;
 
-    // Find the wood deposit whose *nearest* drop-off is furthest away.
+    // Collect deposit IDs that gatherers are currently committed to (gatherMove /
+    // dropoffMove / gathering targeting a wood deposit). Storage placement only
+    // triggers against one of these "actively-worked" deposits.
+    const activeDepositIds = new Set<string>();
+    for (const u of ctx.units) {
+      if (u.state.kind === "gatherMove" || u.state.kind === "gathering") {
+        activeDepositIds.add(u.state.depositId);
+      } else if (u.state.kind === "dropoffMove") {
+        activeDepositIds.add(u.state.depositId);
+      }
+    }
+    if (activeDepositIds.size === 0) return;
+
+    // Pick the wood deposit actually being worked whose nearest drop-off is farthest.
     let farDeposit: ResourceDeposit | null = null;
     let farDist = 0;
     for (const d of engine.deposits) {
       if (d.kind !== "wood" || d.quantity <= 0) continue;
+      if (!activeDepositIds.has(d.id)) continue;
       let nearest = Infinity;
       for (const dr of drops) {
         const dist = Math.hypot(d.position.x - dr.x, d.position.y - dr.y);

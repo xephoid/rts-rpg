@@ -10,6 +10,9 @@ export type UnitStatBlock = {
     armorMetal: number;
     capacity: number;
     attackIntervalSec: number;
+    /** Visual + selection footprint in tiles. Collision is still 1x1 — renderer scales
+     *  the sprite and the hit-test box but the unit occupies a single tile for pathing. */
+    footprintTiles?: number;
     flying?: boolean;
     canAttackAir?: boolean;
     cannotBeConverted?: boolean;
@@ -24,6 +27,8 @@ export type WizardStatBlock = {
     armor: number;
     capacity: number;
     attackIntervalSec: number;
+    /** Visual + selection footprint in tiles. Collision is still 1x1. */
+    footprintTiles?: number;
     flying?: boolean;
     canAttackAir?: boolean;
     cannotBeConverted?: boolean;
