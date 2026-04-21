@@ -354,6 +354,9 @@ export class MilitaryAI {
       // Skip concealed / in-cover enemies — AI doesn't panic over ghosts it can't see.
       if (u.invisibilityActive || u.disguiseActive || u.concealed) continue;
       if (u.state.kind === "hidingInBuilding" || u.state.kind === "inEnemyBuilding") continue;
+      // A temp-controlled leader still reads as a friendly to its original faction.
+      // Skip here too — threat/defence logic would otherwise swarm the AI's own puppet.
+      if (u.tempControlTicks > 0) continue;
       if (_distSq(u.position, homeCenter) < THREAT_RADIUS * THREAT_RADIUS) threats.push(u);
     }
 
@@ -1314,7 +1317,10 @@ function _issueAttackWave(
       !e.disguiseActive &&
       !e.concealed &&
       e.state.kind !== "hidingInBuilding" &&
-      e.state.kind !== "inEnemyBuilding",
+      e.state.kind !== "inEnemyBuilding" &&
+      // Temp-controlled leaders read as friendly to the puppeteer; the rest of the
+      // AI shouldn't waste a wave on them either.
+      e.tempControlTicks <= 0,
     );
   const leaders = enemyUnits.filter((u) => LEADER_TYPES.has(u.typeKey));
   const nonLeaders = enemyUnits

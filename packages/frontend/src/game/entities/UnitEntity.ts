@@ -152,10 +152,17 @@ export class UnitEntity extends Entity {
       inPlatform: this.state.kind === "inPlatform" || undefined,
       invisible: this.invisibilityActive || undefined,
       disguised: this.disguiseActive || undefined,
+      // Display overrides — used by the renderer to decide which sprite + faction
+      // tint to draw. Disguise flips to opposing faction for opponent viewers;
+      // temp-control keeps the puppet rendered as its ORIGINAL faction so every
+      // viewer still recognises the leader (selling the illusion on the robot side
+      // while the wizards actually command it).
       displayFaction: this.disguiseActive
         ? (this.faction === "wizards" ? "robots" : "wizards")
-        : undefined,
-      displayTypeKey: this.disguiseActive ? (this.disguiseTargetTypeKey ?? undefined) : undefined,
+        : (this.tempControlTicks > 0 && this.originalFaction ? this.originalFaction : undefined),
+      displayTypeKey: this.disguiseActive
+        ? (this.disguiseTargetTypeKey ?? undefined)
+        : (this.tempControlTicks > 0 ? this.typeKey : undefined),
       hidden: this.state.kind === "hidingInBuilding" || undefined,
       inEnemyBuilding: this.state.kind === "inEnemyBuilding" || undefined,
       containingBuildingId:

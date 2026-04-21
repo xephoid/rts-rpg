@@ -123,7 +123,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     speed: 5.0,
     charisma: 1,
     armorWood: 2,
-    armorMetal: 5,
+    armorMetal: 10,
     capacity: 0,
     attackIntervalSec: 0.8, // Initial guess: fast attacker
   },
@@ -165,8 +165,8 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     sightRange: 5, // Initial guess
     speed: 3.0,
     charisma: 0,
-    armorWood: 10,
-    armorMetal: 20,
+    armorWood: 20,
+    armorMetal: 40,
     capacity: 0,
     attackIntervalSec: 2.0, // Initial guess: slow heavy hitter
     canAttackAir: true,

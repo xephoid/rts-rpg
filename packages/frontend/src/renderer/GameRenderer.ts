@@ -559,12 +559,17 @@ export class GameRenderer {
       if (invisibleToViewer) continue;
 
       const disguisedToViewer = isEnemy && entity.disguised && !detectedIds.has(entity.id);
+      // Temp-controlled units (Illusionist-puppeted leaders) always render as their
+      // ORIGINAL faction regardless of who is looking — the deception works on both
+      // sides so Wizards can lure the leader out without the robots noticing.
+      const tempControlled = entity.kind === "unit" && entity.tempControlled;
 
       currentIds.add(entity.id);
       const fp = this._getFootprint(entity);
 
-      const displayTypeKey = disguisedToViewer ? (entity.displayTypeKey ?? entity.typeKey) : entity.typeKey;
-      const displayFaction = disguisedToViewer ? (entity.displayFaction ?? entity.faction) : entity.faction;
+      const useDisplayOverride = disguisedToViewer || tempControlled;
+      const displayTypeKey = useDisplayOverride ? (entity.displayTypeKey ?? entity.typeKey) : entity.typeKey;
+      const displayFaction = useDisplayOverride ? (entity.displayFaction ?? entity.faction) : entity.faction;
 
       let sprite = this.entitySprites.get(entity.id);
       const cachedKey = this.spriteKeyCache.get(entity.id);

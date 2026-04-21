@@ -2948,6 +2948,12 @@ export class GameEngine {
     if (target.kind !== "unit") return true;
     const u = target as UnitEntity;
     if (u.state.kind === "hidingInBuilding" || u.state.kind === "inEnemyBuilding") return false;
+    // Puppeted leaders under Illusionist temp-control are "invisible" to both sides'
+    // auto-aggro: robots still see their own leader and don't fire; wizards don't
+    // auto-attack their own faction either. Manual attack orders (issueAttackOrder)
+    // skip this helper and can still connect — so a wizard player can finish the
+    // puppet off once it's lured away.
+    if (u.tempControlTicks > 0) return false;
     if (u.faction === attackerFaction) return true;
     if (u.invisibilityActive || u.disguiseActive || u.concealed) {
       return this._detectedIdsThisTick[attackerFaction].has(u.id);

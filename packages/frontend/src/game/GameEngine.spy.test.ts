@@ -610,6 +610,52 @@ describe("Spy force-out", () => {
     expect(alerts.some((a) => /temporary control/i.test(a))).toBe(true);
   });
 
+  it("Temp-controlled leader renders + targets as original faction deception", () => {
+    const engine = makeEngine();
+    const mStats = robotUnitStats.motherboard!;
+    const leader = new UnitEntity({
+      faction: "wizards", // post-puppet — belongs to wizards now
+      typeKey: "motherboard",
+      position: { x: 15, y: 15 },
+      stats: {
+        maxHp: mStats.hpWood, damage: mStats.damage,
+        attackRange: mStats.attackRange, sightRange: mStats.sightRange,
+        speed: mStats.speed, charisma: mStats.charisma,
+        armor: mStats.armorWood, capacity: mStats.capacity,
+      },
+      isNamed: true,
+      name: "Motherboard",
+      cannotBeConverted: true,
+    });
+    engine.entities.add(leader);
+    leader.tempControlTicks = 500;
+    leader.originalFaction = "robots";
+
+    const snap = leader.toSnapshot();
+    expect(snap.tempControlled).toBe(true);
+    expect(snap.displayFaction).toBe("robots");
+    expect(snap.displayTypeKey).toBe("motherboard");
+
+    // Spawn a nearby robot attacker — auto-aggro should skip the puppet.
+    const sStats = robotUnitStats.spitterPlatform!;
+    const robotAttacker = new UnitEntity({
+      faction: "robots",
+      typeKey: "spitterPlatform",
+      position: { x: 16, y: 15 },
+      stats: {
+        maxHp: sStats.hpWood, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armorWood, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(robotAttacker);
+
+    for (let t = 0; t < 30; t++) engine.stepTick(t, t * 16);
+    expect(robotAttacker.state.kind).toBe("idle");
+    expect(leader.stats.hp).toBe(leader.stats.maxHp);
+  });
+
   it("Temp control expires and leader reverts to original faction", () => {
     const alerts: string[] = [];
     const engine = new GameEngine({
