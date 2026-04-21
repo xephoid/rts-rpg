@@ -302,6 +302,13 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
   },
 };
 
+// ── Spy + detector typeKey sets ───────────────────────────────────────────────
+
+/** Unit typeKeys that can conceal themselves from opponent rendering (via spy abilities). */
+export const CONCEALED_TYPES = new Set(["infiltrationPlatform", "illusionist"]);
+/** Unit typeKeys that reveal concealed/disguised/invisible enemies within their sightRange. */
+export const DETECTOR_TYPES = new Set(["probePlatform", "enchantress"]);
+
 // ── Unit roles + level-up bonuses ─────────────────────────────────────────────
 
 export type UnitRole = "combat" | "worker" | "support" | "spy" | "hero" | "tank" | "core";

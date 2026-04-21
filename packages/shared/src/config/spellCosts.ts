@@ -22,7 +22,18 @@ export const spellCosts = {
   reduceMana: 35,    // Initial guess
   manaShieldDrainPerSec: 8,        // Initial guess: drains continuously while active
   manaShieldDamageReduction: 0.5,  // Initial guess: 50% incoming damage reduction
+  illusionistInvisibilityDrainPerSec: 5, // Initial guess: drains while invisibility is active
 };
+
+/** Research key that unlocks Illusionist invisibility (gate via Library of Illusion). */
+export const illusionistInvisibilityResearchKey = "mindFog";
+
+/**
+ * Leader force-out by an Illusionist: `cannotBeConverted` leaders can't be
+ * permanently taken over, but they CAN be temporarily puppeted for this many ticks.
+ * When the timer expires the leader reverts to its original faction.
+ */
+export const illusionistTempControlDurationTicks = 900; // Initial guess: ~15s at 60 ticks/sec
 
 export const manaConfig = {
   // Initial guess: 500 mana cap for the wizard faction.

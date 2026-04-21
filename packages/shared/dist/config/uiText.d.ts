@@ -24,5 +24,22 @@ export declare const uiText: {
         readonly unexplored: "Unexplored";
         readonly explored: "Explored";
     };
+    readonly spy: {
+        readonly invisibilityOn: "Invisibility";
+        readonly invisibilityOff: "Drop Invisibility";
+        readonly disguise: "Disguise";
+        readonly dropDisguise: "Drop Disguise";
+        readonly pickDisguise: "Pick a unit to disguise as";
+        readonly hide: "Hide";
+        readonly leaveHiding: "Leave Building";
+        readonly infiltrate: "Infiltrate";
+        readonly attackOccupant: "Attack Occupant";
+        readonly alertHide: (unitName: string, buildingName: string) => string;
+        readonly alertConverted: (unitName: string) => string;
+        readonly alertForcedOut: (unitName: string) => string;
+        readonly alertTempControlled: (unitName: string) => string;
+        readonly alertTempControlExpired: (unitName: string) => string;
+        readonly alertDetected: (unitName: string) => string;
+    };
 };
 //# sourceMappingURL=uiText.d.ts.map

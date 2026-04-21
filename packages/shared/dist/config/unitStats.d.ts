@@ -30,6 +30,10 @@ export type WizardStatBlock = {
 };
 export declare const robotUnitStats: Record<string, UnitStatBlock>;
 export declare const wizardUnitStats: Record<string, WizardStatBlock>;
+/** Unit typeKeys that can conceal themselves from opponent rendering (via spy abilities). */
+export declare const CONCEALED_TYPES: Set<string>;
+/** Unit typeKeys that reveal concealed/disguised/invisible enemies within their sightRange. */
+export declare const DETECTOR_TYPES: Set<string>;
 export type UnitRole = "combat" | "worker" | "support" | "spy" | "hero" | "tank" | "core";
 export declare const MILITARY_ROLES: Set<UnitRole>;
 /** Unit typeKeys whose XP counts toward the Culture faction stat. */

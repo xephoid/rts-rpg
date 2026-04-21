@@ -1,0 +1,708 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { GameEngine } from "./GameEngine.js";
+import { UnitEntity } from "./entities/UnitEntity.js";
+import { BuildingEntity } from "./entities/BuildingEntity.js";
+import {
+  wizardUnitStats,
+  robotUnitStats,
+  wizardBuildingStats,
+  robotBuildingStats,
+} from "@neither/shared";
+
+function makeEngine(): GameEngine {
+  return new GameEngine({
+    mapSize: "small",
+    seed: 1,
+    onTick: () => {},
+  });
+}
+
+function spawnIllusionist(engine: GameEngine, pos = { x: 10, y: 10 }): UnitEntity {
+  const stats = wizardUnitStats.illusionist!;
+  const u = new UnitEntity({
+    faction: "wizards",
+    typeKey: "illusionist",
+    position: pos,
+    stats: {
+      maxHp: stats.hp,
+      damage: stats.damage,
+      attackRange: stats.attackRange,
+      sightRange: stats.sightRange,
+      speed: stats.speed,
+      charisma: stats.charisma,
+      armor: stats.armor,
+      capacity: stats.capacity,
+    },
+  });
+  engine.entities.add(u);
+  return u;
+}
+
+function spawnSubject(engine: GameEngine, pos = { x: 8, y: 8 }): UnitEntity {
+  const stats = wizardUnitStats.subject!;
+  const u = new UnitEntity({
+    faction: "wizards",
+    typeKey: "subject",
+    position: pos,
+    stats: {
+      maxHp: stats.hp,
+      damage: stats.damage,
+      attackRange: stats.attackRange,
+      sightRange: stats.sightRange,
+      speed: stats.speed,
+      charisma: stats.charisma,
+      armor: stats.armor,
+      capacity: stats.capacity,
+    },
+  });
+  engine.entities.add(u);
+  return u;
+}
+
+function findOpenTile(engine: GameEngine, start: { x: number; y: number }): { x: number; y: number } {
+  for (let r = 0; r < 20; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const t = { x: start.x + dx, y: start.y + dy };
+        if (engine.grid.isPassable(t.x, t.y)) return t;
+      }
+    }
+  }
+  return start;
+}
+
+function spawnCottage(engine: GameEngine, pos = { x: 20, y: 20 }): BuildingEntity {
+  const bStats = wizardBuildingStats.cottage!;
+  const b = new BuildingEntity({
+    faction: "wizards",
+    typeKey: "cottage",
+    position: pos,
+    stats: {
+      maxHp: bStats.hp,
+      damage: 0,
+      attackRange: 0,
+      sightRange: bStats.visionRange,
+      speed: 0,
+      charisma: 0,
+      armor: 0,
+      capacity: bStats.occupantCapacity,
+    },
+    constructionTicks: 0,
+  });
+  b.state = { kind: "operational" };
+  engine.entities.add(b);
+  return b;
+}
+
+function spawnRechargeStation(engine: GameEngine, pos = { x: 25, y: 25 }): BuildingEntity {
+  const bStats = robotBuildingStats.rechargeStation!;
+  const b = new BuildingEntity({
+    faction: "robots",
+    typeKey: "rechargeStation",
+    position: pos,
+    stats: {
+      maxHp: bStats.hp,
+      damage: 0,
+      attackRange: 0,
+      sightRange: bStats.visionRange,
+      speed: 0,
+      charisma: 0,
+      armor: 0,
+      capacity: bStats.occupantCapacity,
+    },
+    constructionTicks: 0,
+  });
+  b.state = { kind: "operational" };
+  engine.entities.add(b);
+  return b;
+}
+
+function spawnInfiltrator(engine: GameEngine, pos = { x: 12, y: 12 }): UnitEntity {
+  const stats = robotUnitStats.infiltrationPlatform!;
+  const u = new UnitEntity({
+    faction: "robots",
+    typeKey: "infiltrationPlatform",
+    position: pos,
+    stats: {
+      maxHp: stats.hpWood,
+      damage: stats.damage,
+      attackRange: stats.attackRange,
+      sightRange: stats.sightRange,
+      speed: stats.speed,
+      charisma: stats.charisma,
+      armor: stats.armorWood,
+      capacity: stats.capacity,
+    },
+  });
+  engine.entities.add(u);
+  return u;
+}
+
+// ── Invisibility toggle + drain ────────────────────────────────────────────────
+
+describe("Illusionist invisibility", () => {
+  let engine: GameEngine;
+  let illusionist: UnitEntity;
+
+  beforeEach(() => {
+    engine = makeEngine();
+    illusionist = spawnIllusionist(engine);
+    engine.grantResearch("wizards", "mindFog");
+    engine.getResources("wizards").mana = 100;
+  });
+
+  it("spawns with invisibility off and concealed off", () => {
+    expect(illusionist.invisibilityActive).toBe(false);
+    expect(illusionist.concealed).toBe(false);
+  });
+
+  it("does not toggle when research missing", () => {
+    const e2 = makeEngine();
+    const il2 = spawnIllusionist(e2);
+    e2.getResources("wizards").mana = 100;
+    e2.issueInvisibilityToggle(il2.id);
+    expect(il2.invisibilityActive).toBe(false);
+  });
+
+  it("does not toggle when unit is not an Illusionist", () => {
+    const stats = wizardUnitStats.evoker!;
+    const evoker = new UnitEntity({
+      faction: "wizards",
+      typeKey: "evoker",
+      position: { x: 5, y: 5 },
+      stats: {
+        maxHp: stats.hp,
+        damage: stats.damage,
+        attackRange: stats.attackRange,
+        sightRange: stats.sightRange,
+        speed: stats.speed,
+        charisma: stats.charisma,
+        armor: stats.armor,
+        capacity: stats.capacity,
+      },
+    });
+    engine.entities.add(evoker);
+    engine.issueInvisibilityToggle(evoker.id);
+    expect(evoker.invisibilityActive).toBe(false);
+  });
+
+  it("toggles on with research + mana and mirrors concealed flag", () => {
+    engine.issueInvisibilityToggle(illusionist.id);
+    expect(illusionist.invisibilityActive).toBe(true);
+    expect(illusionist.concealed).toBe(true);
+  });
+
+  it("refuses to toggle on when mana is zero", () => {
+    engine.getResources("wizards").mana = 0;
+    engine.issueInvisibilityToggle(illusionist.id);
+    expect(illusionist.invisibilityActive).toBe(false);
+  });
+
+  it("toggles off regardless of mana level", () => {
+    engine.issueInvisibilityToggle(illusionist.id); // on
+    engine.getResources("wizards").mana = 0;
+    engine.issueInvisibilityToggle(illusionist.id); // off
+    expect(illusionist.invisibilityActive).toBe(false);
+    expect(illusionist.concealed).toBe(false);
+  });
+
+  it("snapshot exposes invisible field when active", () => {
+    engine.issueInvisibilityToggle(illusionist.id);
+    const snap = illusionist.toSnapshot();
+    expect(snap.invisible).toBe(true);
+  });
+
+  it("drains mana while active — fewer mana gained per tick vs. inactive baseline", () => {
+    // Inactive baseline: run a tick with invisibility off.
+    const baselineEngine = makeEngine();
+    const baselineIl = spawnIllusionist(baselineEngine);
+    void baselineIl;
+    const manaBefore = baselineEngine.getResources("wizards").mana;
+    baselineEngine.stepTick(0, 0);
+    const baselineDelta = baselineEngine.getResources("wizards").mana - manaBefore;
+
+    // Active: one illusionist with invisibility toggled on.
+    engine.issueInvisibilityToggle(illusionist.id);
+    const activeBefore = engine.getResources("wizards").mana;
+    engine.stepTick(0, 0);
+    const activeDelta = engine.getResources("wizards").mana - activeBefore;
+
+    expect(activeDelta).toBeLessThan(baselineDelta);
+  });
+
+});
+
+// ── Disguise toggle ────────────────────────────────────────────────────────────
+
+describe("Infiltration Platform disguise", () => {
+  let engine: GameEngine;
+  let inf: UnitEntity;
+
+  beforeEach(() => {
+    engine = makeEngine();
+    inf = spawnInfiltrator(engine);
+  });
+
+  it("spawns with disguise off", () => {
+    expect(inf.disguiseActive).toBe(false);
+    expect(inf.disguiseTargetTypeKey).toBeNull();
+  });
+
+  it("accepts an enemy-roster typeKey", () => {
+    engine.issueDisguise(inf.id, "evoker");
+    expect(inf.disguiseActive).toBe(true);
+    expect(inf.disguiseTargetTypeKey).toBe("evoker");
+  });
+
+  it("rejects a friendly-roster typeKey", () => {
+    engine.issueDisguise(inf.id, "spitterPlatform"); // same-faction robot unit
+    expect(inf.disguiseActive).toBe(false);
+    expect(inf.disguiseTargetTypeKey).toBeNull();
+  });
+
+  it("rejects an unknown typeKey", () => {
+    engine.issueDisguise(inf.id, "spaghettiMonster");
+    expect(inf.disguiseActive).toBe(false);
+  });
+
+  it("does nothing when called on a non-infiltration unit", () => {
+    const illusionist = spawnIllusionist(engine);
+    engine.issueDisguise(illusionist.id, "evoker");
+    expect(illusionist.disguiseActive).toBe(false);
+  });
+
+  it("snapshot exposes displayFaction + displayTypeKey while disguised", () => {
+    engine.issueDisguise(inf.id, "dragon");
+    const snap = inf.toSnapshot();
+    expect(snap.disguised).toBe(true);
+    expect(snap.displayFaction).toBe("wizards");
+    expect(snap.displayTypeKey).toBe("dragon");
+  });
+
+  it("clearDisguise returns to normal", () => {
+    engine.issueDisguise(inf.id, "evoker");
+    engine.issueClearDisguise(inf.id);
+    expect(inf.disguiseActive).toBe(false);
+    expect(inf.disguiseTargetTypeKey).toBeNull();
+    const snap = inf.toSnapshot();
+    expect(snap.disguised).toBeUndefined();
+    expect(snap.displayFaction).toBeUndefined();
+  });
+
+  it("does not alter `concealed` (disguise stays in opponent rendering only)", () => {
+    engine.issueDisguise(inf.id, "evoker");
+    expect(inf.concealed).toBe(false);
+  });
+});
+
+// ── Hide flow ──────────────────────────────────────────────────────────────────
+
+describe("Hide in friendly building", () => {
+  let engine: GameEngine;
+  let subject: UnitEntity;
+  let cottage: BuildingEntity;
+
+  beforeEach(() => {
+    engine = makeEngine();
+    const open = findOpenTile(engine, { x: 8, y: 8 });
+    subject = spawnSubject(engine, open);
+    const cottageAnchor = findOpenTile(engine, { x: open.x + 2, y: open.y + 2 });
+    cottage = spawnCottage(engine, cottageAnchor);
+  });
+
+  it("transitions subject through hideMove to hidingInBuilding", () => {
+    engine.issueHideOrder(subject.id, cottage.id);
+    expect(subject.state.kind).toBe("hideMove");
+
+    // Step simulation until arrival.
+    for (let t = 0; t < 600 && subject.state.kind !== "hidingInBuilding"; t++) {
+      engine.stepTick(t, t * 16);
+    }
+    expect(subject.state.kind).toBe("hidingInBuilding");
+    expect(cottage.occupantIds.has(subject.id)).toBe(true);
+    expect(subject.toSnapshot().hidden).toBe(true);
+  });
+
+  it("rejects hide order on enemy-faction building", () => {
+    const rs = spawnRechargeStation(engine);
+    engine.issueHideOrder(subject.id, rs.id);
+    expect(subject.state.kind).toBe("idle");
+  });
+
+  it("rejects hide order on non-hiding-capable building", () => {
+    const castle = new BuildingEntity({
+      faction: "wizards",
+      typeKey: "castle",
+      position: { x: 30, y: 30 },
+      stats: {
+        maxHp: 1, damage: 0, attackRange: 0, sightRange: 5,
+        speed: 0, charisma: 0, armor: 0, capacity: 0,
+      },
+      constructionTicks: 0,
+    });
+    castle.state = { kind: "operational" };
+    engine.entities.add(castle);
+    engine.issueHideOrder(subject.id, castle.id);
+    expect(subject.state.kind).toBe("idle");
+  });
+
+  it("rejects hide order on non-hideable unit types", () => {
+    const stats = wizardUnitStats.evoker!;
+    const evoker = new UnitEntity({
+      faction: "wizards",
+      typeKey: "evoker",
+      position: { x: 8, y: 8 },
+      stats: {
+        maxHp: stats.hp, damage: stats.damage,
+        attackRange: stats.attackRange, sightRange: stats.sightRange,
+        speed: stats.speed, charisma: stats.charisma,
+        armor: stats.armor, capacity: stats.capacity,
+      },
+    });
+    engine.entities.add(evoker);
+    engine.issueHideOrder(evoker.id, cottage.id);
+    expect(evoker.state.kind).toBe("idle");
+  });
+
+  it("leaveHiding exits subject to adjacent tile", () => {
+    // Fast-track: directly mark the subject as hiding (skip pathfinding).
+    cottage.occupantIds.add(subject.id);
+    subject.state = { kind: "hidingInBuilding", buildingId: cottage.id };
+    subject.position = { ...cottage.position };
+
+    engine.issueLeaveHidingOrder(subject.id);
+    expect(subject.state.kind).toBe("idle");
+    expect(cottage.occupantIds.has(subject.id)).toBe(false);
+    // Position should now differ from the cottage's footprint origin
+    expect(
+      subject.position.x !== cottage.position.x ||
+      subject.position.y !== cottage.position.y,
+    ).toBe(true);
+  });
+
+  it("eject command flushes hidden occupants", () => {
+    cottage.occupantIds.add(subject.id);
+    subject.state = { kind: "hidingInBuilding", buildingId: cottage.id };
+    subject.position = { ...cottage.position };
+
+    engine.issueEjectOccupantsOrder(cottage.id);
+    expect(subject.state.kind).toBe("idle");
+    expect(cottage.occupantIds.has(subject.id)).toBe(false);
+  });
+});
+
+// ── Detection set ──────────────────────────────────────────────────────────────
+
+describe("Detector reveal", () => {
+  function spawnEnchantress(engine: GameEngine, pos: { x: number; y: number }): UnitEntity {
+    const stats = wizardUnitStats.enchantress!;
+    const u = new UnitEntity({
+      faction: "wizards",
+      typeKey: "enchantress",
+      position: pos,
+      stats: {
+        maxHp: stats.hp, damage: stats.damage,
+        attackRange: stats.attackRange, sightRange: stats.sightRange,
+        speed: stats.speed, charisma: stats.charisma,
+        armor: stats.armor, capacity: stats.capacity,
+      },
+    });
+    engine.entities.add(u);
+    return u;
+  }
+
+  function spawnProbe(engine: GameEngine, pos: { x: number; y: number }): UnitEntity {
+    const stats = robotUnitStats.probePlatform!;
+    const u = new UnitEntity({
+      faction: "robots",
+      typeKey: "probePlatform",
+      position: pos,
+      stats: {
+        maxHp: stats.hpWood, damage: stats.damage,
+        attackRange: stats.attackRange, sightRange: stats.sightRange,
+        speed: stats.speed, charisma: stats.charisma,
+        armor: stats.armorWood, capacity: stats.capacity,
+      },
+      isFlying: stats.flying ?? false,
+    });
+    engine.entities.add(u);
+    return u;
+  }
+
+  it("no detector → no revealed units", () => {
+    let captured: Record<string, string[]> | null = null;
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: (s) => { captured = s.detectedIds; },
+    });
+    const il = spawnIllusionist(engine, { x: 10, y: 10 });
+    engine.grantResearch("wizards", "mindFog");
+    engine.getResources("wizards").mana = 50;
+    engine.issueInvisibilityToggle(il.id);
+    engine.stepTick(0, 0);
+    expect(captured!.robots).not.toContain(il.id);
+  });
+
+  it("enemy detector within sightRange reveals invisible illusionist", () => {
+    let captured: Record<string, string[]> | null = null;
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: (s) => { captured = s.detectedIds; },
+    });
+    const il = spawnIllusionist(engine, { x: 10, y: 10 });
+    engine.grantResearch("wizards", "mindFog");
+    engine.getResources("wizards").mana = 50;
+    engine.issueInvisibilityToggle(il.id);
+    // Probe Platform within illusionist's position; probePlatform sightRange is 10.
+    spawnProbe(engine, { x: 12, y: 12 });
+    engine.stepTick(0, 0);
+    expect(captured!.robots).toContain(il.id);
+  });
+
+  it("detector out of sightRange does NOT reveal", () => {
+    let captured: Record<string, string[]> | null = null;
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: (s) => { captured = s.detectedIds; },
+    });
+    const il = spawnIllusionist(engine, { x: 10, y: 10 });
+    engine.grantResearch("wizards", "mindFog");
+    engine.getResources("wizards").mana = 50;
+    engine.issueInvisibilityToggle(il.id);
+    // Probe far away — probePlatform sightRange=10, distance ~40.
+    spawnProbe(engine, { x: 50, y: 50 });
+    engine.stepTick(0, 0);
+    expect(captured!.robots).not.toContain(il.id);
+  });
+
+  it("enchantress reveals a disguised infiltration platform", () => {
+    let captured: Record<string, string[]> | null = null;
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: (s) => { captured = s.detectedIds; },
+    });
+    const inf = spawnInfiltrator(engine, { x: 14, y: 14 });
+    engine.issueDisguise(inf.id, "evoker");
+    spawnEnchantress(engine, { x: 15, y: 15 });
+    engine.stepTick(0, 0);
+    expect(captured!.wizards).toContain(inf.id);
+  });
+});
+
+// ── Force-out ──────────────────────────────────────────────────────────────────
+
+describe("Spy force-out", () => {
+  it("Illusionist infiltrate: converts hidden subject + ejects", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: () => {},
+      onAlert: (m) => alerts.push(m),
+    });
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const illusionist = spawnIllusionist(engine, open);
+    const cottageAnchor = findOpenTile(engine, { x: open.x + 3, y: open.y + 3 });
+    // Cottage belongs to robots to make it an ENEMY building (wizards faction illusionist).
+    const bStats = wizardBuildingStats.cottage!;
+    const cottage = new BuildingEntity({
+      faction: "robots", // enemy building
+      typeKey: "cottage",
+      position: cottageAnchor,
+      stats: {
+        maxHp: bStats.hp, damage: 0, attackRange: 0,
+        sightRange: bStats.visionRange, speed: 0, charisma: 0, armor: 0,
+        capacity: bStats.occupantCapacity,
+      },
+      constructionTicks: 0,
+    });
+    cottage.state = { kind: "operational" };
+    engine.entities.add(cottage);
+
+    // Hidden subject (also robots — matches enemy faction).
+    const sStats = wizardUnitStats.subject!;
+    const hidden = new UnitEntity({
+      faction: "robots",
+      typeKey: "subject",
+      position: { ...cottage.position },
+      stats: {
+        maxHp: sStats.hp, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armor, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(hidden);
+    cottage.occupantIds.add(hidden.id);
+    hidden.state = { kind: "hidingInBuilding", buildingId: cottage.id };
+
+    engine.issueInfiltrateOrder(illusionist.id, cottage.id);
+    for (let t = 0; t < 600 && illusionist.state.kind !== "idle"; t++) {
+      engine.stepTick(t, t * 16);
+    }
+
+    expect(hidden.faction).toBe("wizards");
+    expect(hidden.state.kind).toBe("idle");
+    expect(cottage.occupantIds.has(hidden.id)).toBe(false);
+    expect(alerts.some((a) => a.includes("captured"))).toBe(true);
+  });
+
+  it("Illusionist infiltrate: leaders are temporarily controlled (not permanently converted)", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: () => {},
+      onAlert: (m) => alerts.push(m),
+    });
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const illusionist = spawnIllusionist(engine, open);
+    const cottageAnchor = findOpenTile(engine, { x: open.x + 3, y: open.y + 3 });
+    const bStats = wizardBuildingStats.cottage!;
+    const cottage = new BuildingEntity({
+      faction: "robots",
+      typeKey: "cottage",
+      position: cottageAnchor,
+      stats: {
+        maxHp: bStats.hp, damage: 0, attackRange: 0,
+        sightRange: bStats.visionRange, speed: 0, charisma: 0, armor: 0,
+        capacity: bStats.occupantCapacity,
+      },
+      constructionTicks: 0,
+    });
+    cottage.state = { kind: "operational" };
+    engine.entities.add(cottage);
+
+    const mStats = robotUnitStats.motherboard!;
+    const leader = new UnitEntity({
+      faction: "robots",
+      typeKey: "motherboard",
+      position: { ...cottage.position },
+      stats: {
+        maxHp: mStats.hpWood, damage: mStats.damage,
+        attackRange: mStats.attackRange, sightRange: mStats.sightRange,
+        speed: mStats.speed, charisma: mStats.charisma,
+        armor: mStats.armorWood, capacity: mStats.capacity,
+      },
+      isNamed: true,
+      name: "Motherboard",
+      cannotBeConverted: true,
+    });
+    engine.entities.add(leader);
+    cottage.occupantIds.add(leader.id);
+    leader.state = { kind: "hidingInBuilding", buildingId: cottage.id };
+
+    engine.issueInfiltrateOrder(illusionist.id, cottage.id);
+    for (let t = 0; t < 600 && illusionist.state.kind !== "idle"; t++) {
+      engine.stepTick(t, t * 16);
+    }
+
+    // Temporarily puppeted — faction flipped to wizards, tempControl active.
+    expect(leader.faction).toBe("wizards");
+    expect(leader.tempControlTicks).toBeGreaterThan(0);
+    expect(leader.originalFaction).toBe("robots");
+    expect(cottage.occupantIds.has(leader.id)).toBe(false);
+    expect(alerts.some((a) => /temporary control/i.test(a))).toBe(true);
+  });
+
+  it("Temp control expires and leader reverts to original faction", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: () => {},
+      onAlert: (m) => alerts.push(m),
+    });
+    const mStats = robotUnitStats.motherboard!;
+    const leader = new UnitEntity({
+      faction: "wizards", // already under puppet control in this setup
+      typeKey: "motherboard",
+      position: { x: 20, y: 20 },
+      stats: {
+        maxHp: mStats.hpWood, damage: mStats.damage,
+        attackRange: mStats.attackRange, sightRange: mStats.sightRange,
+        speed: mStats.speed, charisma: mStats.charisma,
+        armor: mStats.armorWood, capacity: mStats.capacity,
+      },
+      isNamed: true,
+      name: "Motherboard",
+      cannotBeConverted: true,
+    });
+    engine.entities.add(leader);
+    leader.tempControlTicks = 3;
+    leader.originalFaction = "robots";
+
+    // Three ticks of decrement, then revert fires.
+    engine.stepTick(0, 0);
+    engine.stepTick(1, 16);
+    engine.stepTick(2, 32);
+    expect(leader.faction).toBe("robots");
+    expect(leader.originalFaction).toBeNull();
+    expect(leader.tempControlTicks).toBe(0);
+    expect(alerts.some((a) => /no longer under control/i.test(a))).toBe(true);
+  });
+
+  it("Infiltration Platform: attack-from-inside ejects hidden occupant hostile", () => {
+    const engine = makeEngine();
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const inf = spawnInfiltrator(engine, open);
+    const cottageAnchor = findOpenTile(engine, { x: open.x + 3, y: open.y + 3 });
+    const bStats = wizardBuildingStats.cottage!;
+    const cottage = new BuildingEntity({
+      faction: "wizards", // enemy of infiltrator (robots)
+      typeKey: "cottage",
+      position: cottageAnchor,
+      stats: {
+        maxHp: bStats.hp, damage: 0, attackRange: 0,
+        sightRange: bStats.visionRange, speed: 0, charisma: 0, armor: 0,
+        capacity: bStats.occupantCapacity,
+      },
+      constructionTicks: 0,
+    });
+    cottage.state = { kind: "operational" };
+    engine.entities.add(cottage);
+
+    const sStats = wizardUnitStats.subject!;
+    const hidden = new UnitEntity({
+      faction: "wizards",
+      typeKey: "subject",
+      position: { ...cottage.position },
+      stats: {
+        maxHp: sStats.hp, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armor, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(hidden);
+    cottage.occupantIds.add(hidden.id);
+    hidden.state = { kind: "hidingInBuilding", buildingId: cottage.id };
+
+    engine.issueInfiltrateOrder(inf.id, cottage.id);
+    for (let t = 0; t < 600 && inf.state.kind !== "inEnemyBuilding"; t++) {
+      engine.stepTick(t, t * 16);
+    }
+    expect(inf.state.kind).toBe("inEnemyBuilding");
+
+    const hpBefore = hidden.stats.hp;
+    engine.issueInfiltrateAttack(inf.id, hidden.id);
+    expect(hidden.stats.hp).toBeLessThan(hpBefore);
+    expect(hidden.faction).toBe("wizards"); // NOT converted
+    expect(hidden.state.kind).toBe("idle");
+    expect(cottage.occupantIds.has(hidden.id)).toBe(false);
+  });
+
+  it("Infiltration attack rejected when target not in same building", () => {
+    const engine = makeEngine();
+    const inf = spawnInfiltrator(engine);
+    const stray = spawnSubject(engine);
+    // inf not in `inEnemyBuilding` state → attack should no-op.
+    const hpBefore = stray.stats.hp;
+    engine.issueInfiltrateAttack(inf.id, stray.id);
+    expect(stray.stats.hp).toBe(hpBefore);
+  });
+});

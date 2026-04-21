@@ -51,6 +51,20 @@ export function App() {
   const clearPendingEjectOccupants = useUIStore((s) => s.clearPendingEjectOccupants);
   const pendingManaShieldToggle = useUIStore((s) => s.pendingManaShieldToggle);
   const clearPendingManaShieldToggle = useUIStore((s) => s.clearPendingManaShieldToggle);
+  const pendingInvisibilityToggle = useUIStore((s) => s.pendingInvisibilityToggle);
+  const clearPendingInvisibilityToggle = useUIStore((s) => s.clearPendingInvisibilityToggle);
+  const pendingDisguise = useUIStore((s) => s.pendingDisguise);
+  const clearPendingDisguise = useUIStore((s) => s.clearPendingDisguise);
+  const pendingClearDisguise = useUIStore((s) => s.pendingClearDisguise);
+  const clearPendingClearDisguise = useUIStore((s) => s.clearPendingClearDisguise);
+  const pendingHideOrder = useUIStore((s) => s.pendingHideOrder);
+  const clearPendingHideOrder = useUIStore((s) => s.clearPendingHideOrder);
+  const pendingLeaveHiding = useUIStore((s) => s.pendingLeaveHiding);
+  const clearPendingLeaveHiding = useUIStore((s) => s.clearPendingLeaveHiding);
+  const pendingInfiltrate = useUIStore((s) => s.pendingInfiltrate);
+  const clearPendingInfiltrate = useUIStore((s) => s.clearPendingInfiltrate);
+  const pendingInfiltrateAttack = useUIStore((s) => s.pendingInfiltrateAttack);
+  const clearPendingInfiltrateAttack = useUIStore((s) => s.clearPendingInfiltrateAttack);
   const pendingSpell = useUIStore((s) => s.pendingSpell);
   const pendingIceBlast = useUIStore((s) => s.pendingIceBlast);
   const clearPendingIceBlast = useUIStore((s) => s.clearPendingIceBlast);
@@ -107,6 +121,12 @@ export function App() {
       },
       onEnterPlatformOrder: (coreId, platformId) => {
         engineRef.current?.issueEnterPlatformOrder(coreId, platformId);
+      },
+      onHideOrder: (unitId, buildingId) => {
+        useUIStore.getState().issueHideOrder(unitId, buildingId);
+      },
+      onInfiltrateOrder: (spyId, buildingId) => {
+        useUIStore.getState().issueInfiltrate(spyId, buildingId);
       },
       onBuildOrder: (tileX, tileY) => {
         const bm = useUIStore.getState().buildMode;
@@ -315,6 +335,49 @@ export function App() {
     engineRef.current?.issueManaShieldToggle(pendingManaShieldToggle);
     clearPendingManaShieldToggle();
   }, [pendingManaShieldToggle, clearPendingManaShieldToggle]);
+
+  // Spy — invisibility / disguise / hide / infiltrate bridges
+  useEffect(() => {
+    if (!pendingInvisibilityToggle) return;
+    engineRef.current?.issueInvisibilityToggle(pendingInvisibilityToggle);
+    clearPendingInvisibilityToggle();
+  }, [pendingInvisibilityToggle, clearPendingInvisibilityToggle]);
+
+  useEffect(() => {
+    if (!pendingDisguise) return;
+    engineRef.current?.issueDisguise(pendingDisguise.unitId, pendingDisguise.targetTypeKey);
+    clearPendingDisguise();
+  }, [pendingDisguise, clearPendingDisguise]);
+
+  useEffect(() => {
+    if (!pendingClearDisguise) return;
+    engineRef.current?.issueClearDisguise(pendingClearDisguise);
+    clearPendingClearDisguise();
+  }, [pendingClearDisguise, clearPendingClearDisguise]);
+
+  useEffect(() => {
+    if (!pendingHideOrder) return;
+    engineRef.current?.issueHideOrder(pendingHideOrder.unitId, pendingHideOrder.buildingId);
+    clearPendingHideOrder();
+  }, [pendingHideOrder, clearPendingHideOrder]);
+
+  useEffect(() => {
+    if (!pendingLeaveHiding) return;
+    engineRef.current?.issueLeaveHidingOrder(pendingLeaveHiding);
+    clearPendingLeaveHiding();
+  }, [pendingLeaveHiding, clearPendingLeaveHiding]);
+
+  useEffect(() => {
+    if (!pendingInfiltrate) return;
+    engineRef.current?.issueInfiltrateOrder(pendingInfiltrate.spyId, pendingInfiltrate.buildingId);
+    clearPendingInfiltrate();
+  }, [pendingInfiltrate, clearPendingInfiltrate]);
+
+  useEffect(() => {
+    if (!pendingInfiltrateAttack) return;
+    engineRef.current?.issueInfiltrateAttack(pendingInfiltrateAttack.platformId, pendingInfiltrateAttack.occupantId);
+    clearPendingInfiltrateAttack();
+  }, [pendingInfiltrateAttack, clearPendingInfiltrateAttack]);
 
   // Sync spell targeting mode to renderer
   useEffect(() => {

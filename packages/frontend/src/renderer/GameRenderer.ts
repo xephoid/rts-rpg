@@ -51,6 +51,10 @@ export type RendererConfig = {
   onGarrisonOrder?: (unitId: string, towerId: string) => void;
   /** Called when a free Core right-clicks a friendly Immobile Combat Platform below capacity. */
   onEnterPlatformOrder?: (coreId: string, platformId: string) => void;
+  /** Called when a hideable friendly unit right-clicks a friendly Cottage / Recharge Station. */
+  onHideOrder?: (unitId: string, buildingId: string) => void;
+  /** Called when a spy (Illusionist / Infiltration Platform) right-clicks an enemy Cottage / Recharge Station. */
+  onInfiltrateOrder?: (spyId: string, buildingId: string) => void;
   /** Called when user clicks a unit while a unit-targeted spell is pending. */
   onSpellTargetUnit?: (casterId: string, spellKind: string, targetId: string) => void;
   /** Called when user clicks a ground tile while a ground-targeted spell is pending. */
@@ -82,6 +86,10 @@ export class GameRenderer {
   // Entity rendering
   private entityContainer: Container | null = null;
   private entitySprites = new Map<string, Sprite>();
+  /** Tracks "faction:typeKey" currently rendered per entity id. When disguise flips the
+   *  rendered identity for opponents, mismatch triggers sprite rebuild so we don't
+   *  leak the cached robot/wizard sprite across a viewer swap. */
+  private spriteKeyCache = new Map<string, string>();
   private selectionGfx: Graphics | null = null;
   private lastEntities: EntitySnapshot[] = [];
   private lastFog: FogSnapshot | null = null;
@@ -266,7 +274,7 @@ export class GameRenderer {
 
     this._processAttackEffects(state.attacks ?? []);
     this._processSpellEffects(state.spells ?? []);
-    this._renderEntities(state.entities);
+    this._renderEntities(state.entities, new Set(state.detectedIds[this.activeFaction] ?? []));
     this._updateTerritoryBoundary(state.entities);
     this._renderFog(this.lastFog);
     this._applyCamera();
@@ -366,16 +374,24 @@ export class GameRenderer {
   }
 
   private _createEntitySprite(entity: EntitySnapshot): Sprite {
+    return this._createEntitySpriteFor(entity.faction, entity.typeKey, entity);
+  }
+
+  /** Like `_createEntitySprite` but lets the caller override the displayed faction /
+   *  typeKey (used for Infiltration Platform disguise, where opponents see the spy
+   *  as one of their own units). Fallback tint uses the *displayed* faction so a
+   *  missing sprite still shows the right team colour. */
+  private _createEntitySpriteFor(displayFaction: Faction, displayTypeKey: string, entity: EntitySnapshot): Sprite {
     const path =
       entity.kind === "building"
-        ? buildingSpritePath(entity.faction, entity.typeKey)
-        : unitSpritePath(entity.faction, entity.typeKey);
+        ? buildingSpritePath(displayFaction, displayTypeKey)
+        : unitSpritePath(displayFaction, displayTypeKey);
     let sprite: Sprite;
     try {
       sprite = path ? Sprite.from(path) : new Sprite();
     } catch {
       sprite = new Sprite();
-      sprite.tint = entity.faction === "wizards" ? 0xa855f7 : 0xeab308;
+      sprite.tint = displayFaction === "wizards" ? 0xa855f7 : 0xeab308;
     }
     return sprite;
   }
@@ -483,7 +499,7 @@ export class GameRenderer {
     return 0xffffff;
   }
 
-  private _renderEntities(entities: EntitySnapshot[]): void {
+  private _renderEntities(entities: EntitySnapshot[], detectedIds: Set<string>): void {
     if (!this.entityContainer) return;
 
     if (!this.selectionGfx) {
@@ -496,19 +512,44 @@ export class GameRenderer {
     const currentIds = new Set<string>();
     for (const entity of entities) {
       // Hide units that are tucked inside a carrier:
-      //  - isShell   → Core attached to a mobile platform (robot combined unit)
-      //  - garrisoned → unit inside a Wizard Tower
-      //  - inPlatform → Core inside an Immobile Combat Platform
-      if (entity.kind === "unit" && (entity.isShell || entity.garrisoned || entity.inPlatform)) continue;
+      //  - isShell        → Core attached to a mobile platform (robot combined unit)
+      //  - garrisoned     → unit inside a Wizard Tower
+      //  - inPlatform     → Core inside an Immobile Combat Platform
+      //  - hidden         → civilian/leader hiding in friendly Cottage/Recharge Station
+      //  - inEnemyBuilding→ Infiltration Platform occupying an enemy Cottage/Recharge Station
+      if (entity.kind === "unit" && (entity.isShell || entity.garrisoned || entity.inPlatform || entity.hidden || entity.inEnemyBuilding)) continue;
+
+      // Spy visibility filter — opposing faction:
+      //   invisible illusionist not in detector reveal set → skip rendering entirely.
+      //   disguised infiltrator not in detector reveal set → render enemy sprite via displayTypeKey.
+      // Own faction spies render normally; invisibility applies an alpha dim, disguise a small marker.
+      const isEnemy = entity.kind === "unit" && entity.faction !== this.activeFaction;
+      const invisibleToViewer = isEnemy && entity.invisible && !detectedIds.has(entity.id);
+      if (invisibleToViewer) continue;
+
+      const disguisedToViewer = isEnemy && entity.disguised && !detectedIds.has(entity.id);
+
       currentIds.add(entity.id);
       const fp = this._getFootprint(entity);
 
+      const displayTypeKey = disguisedToViewer ? (entity.displayTypeKey ?? entity.typeKey) : entity.typeKey;
+      const displayFaction = disguisedToViewer ? (entity.displayFaction ?? entity.faction) : entity.faction;
+
       let sprite = this.entitySprites.get(entity.id);
+      const cachedKey = this.spriteKeyCache.get(entity.id);
+      const currentKey = `${displayFaction}:${displayTypeKey}`;
+      if (sprite && cachedKey !== currentKey) {
+        // Disguise flipped the rendered identity — rebuild the sprite.
+        sprite.destroy();
+        sprite = undefined;
+        this.entitySprites.delete(entity.id);
+      }
       if (!sprite) {
-        sprite = this._createEntitySprite(entity);
+        sprite = this._createEntitySpriteFor(displayFaction, displayTypeKey, entity);
         sprite.zIndex = entity.flying ? 2 : 0;
         this.entityContainer.addChild(sprite);
         this.entitySprites.set(entity.id, sprite);
+        this.spriteKeyCache.set(entity.id, currentKey);
       }
 
       sprite.x = entity.position.x * TILE_SIZE;
@@ -524,6 +565,8 @@ export class GameRenderer {
         if (flash !== undefined) this.flashEndTick.delete(entity.id);
         sprite.tint = baseTint;
       }
+      // Own invisible illusionist: semi-transparent to signal the toggle is on.
+      sprite.alpha = entity.kind === "unit" && entity.faction === this.activeFaction && entity.invisible ? 0.5 : 1.0;
 
       const fogVal = this._fogValueAt(entity.position.x, entity.position.y);
       sprite.visible = fogVal === 2 || (fogVal === 1 && entity.kind === "building");
@@ -534,6 +577,7 @@ export class GameRenderer {
       if (!currentIds.has(id)) {
         sprite.destroy();
         this.entitySprites.delete(id);
+        this.spriteKeyCache.delete(id);
       }
     }
 
@@ -1024,10 +1068,41 @@ export class GameRenderer {
         }
       }
       if (hitEntity.faction !== this.activeFaction) {
+        // Infiltrate: spy right-clicks an enemy Cottage / Recharge Station.
+        if (
+          hitEntity.kind === "building" &&
+          (hitEntity.typeKey === "cottage" || hitEntity.typeKey === "rechargeStation") &&
+          hitEntity.buildingState === "operational"
+        ) {
+          const spy = this.lastEntities
+            .filter((e) => friendlyIds.includes(e.id) && (e.typeKey === "illusionist" || e.typeKey === "infiltrationPlatform"))
+            .shift();
+          if (spy) {
+            this.config.onInfiltrateOrder?.(spy.id, hitEntity.id);
+            return;
+          }
+        }
         this.config.onAttackOrder?.(friendlyIds, hitEntity.id);
       } else if (hitEntity.kind === "unit") {
         this.config.onFollowOrder?.(friendlyIds, hitEntity.id);
       } else if (hitEntity.kind === "building") {
+        // Hide: civilian/leader right-clicks a friendly Cottage / Recharge Station.
+        if (
+          (hitEntity.typeKey === "cottage" || hitEntity.typeKey === "rechargeStation") &&
+          hitEntity.buildingState === "operational"
+        ) {
+          const hideable = this.lastEntities
+            .filter((e) =>
+              friendlyIds.includes(e.id) &&
+              (e.typeKey === "subject" || e.typeKey === "core" ||
+                e.typeKey === "archmage" || e.typeKey === "motherboard") &&
+              !e.hidden && !e.isShell)
+            .shift();
+          if (hideable) {
+            this.config.onHideOrder?.(hideable.id, hitEntity.id);
+            return;
+          }
+        }
         // Garrison order: evoker/archmage → operational wizard tower
         if (
           hitEntity.typeKey === "wizardTower" &&

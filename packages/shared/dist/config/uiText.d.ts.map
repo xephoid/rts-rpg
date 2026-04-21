@@ -1,1 +1,1 @@
-{"version":3,"file":"uiText.d.ts","sourceRoot":"","sources":["../../src/config/uiText.ts"],"names":[],"mappings":"AAGA,eAAO,MAAM,MAAM;;;;;;;;;;;;;;;;;;;;yCAoBS,MAAM,aAAa,MAAM;;;;;;CAO3C,CAAC"}
+{"version":3,"file":"uiText.d.ts","sourceRoot":"","sources":["../../src/config/uiText.ts"],"names":[],"mappings":"AAGA,eAAO,MAAM,MAAM;;;;;;;;;;;;;;;;;;;;yCAoBS,MAAM,aAAa,MAAM;;;;;;;;;;;;;;;;uCAiB3B,MAAM,gBAAgB,MAAM;4CACvB,MAAM;4CACN,MAAM;iDACD,MAAM;qDACF,MAAM;2CAChB,MAAM;;CAE1B,CAAC"}

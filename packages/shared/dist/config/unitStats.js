@@ -236,7 +236,7 @@ export const wizardUnitStats = {
         canAttackAir: true,
         speed: 1.5,
         charisma: 2,
-        armor: 20,
+        armor: 0,
         capacity: 0,
         attackIntervalSec: 2.0, // Initial guess: slow powerful breath
     },
@@ -265,6 +265,11 @@ export const wizardUnitStats = {
         attackIntervalSec: 3.0, // Initial guess: rarely attacks
     },
 };
+// ── Spy + detector typeKey sets ───────────────────────────────────────────────
+/** Unit typeKeys that can conceal themselves from opponent rendering (via spy abilities). */
+export const CONCEALED_TYPES = new Set(["infiltrationPlatform", "illusionist"]);
+/** Unit typeKeys that reveal concealed/disguised/invisible enemies within their sightRange. */
+export const DETECTOR_TYPES = new Set(["probePlatform", "enchantress"]);
 export const MILITARY_ROLES = new Set(["combat", "tank", "hero", "spy"]);
 /** Unit typeKeys whose XP counts toward the Culture faction stat. */
 export const CIVILIAN_UNIT_TYPES = new Set(["core", "subject"]);

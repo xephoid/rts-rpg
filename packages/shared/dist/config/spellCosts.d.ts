@@ -12,7 +12,16 @@ export declare const spellCosts: {
     reduceMana: number;
     manaShieldDrainPerSec: number;
     manaShieldDamageReduction: number;
+    illusionistInvisibilityDrainPerSec: number;
 };
+/** Research key that unlocks Illusionist invisibility (gate via Library of Illusion). */
+export declare const illusionistInvisibilityResearchKey = "mindFog";
+/**
+ * Leader force-out by an Illusionist: `cannotBeConverted` leaders can't be
+ * permanently taken over, but they CAN be temporarily puppeted for this many ticks.
+ * When the timer expires the leader reverts to its original faction.
+ */
+export declare const illusionistTempControlDurationTicks = 900;
 export declare const manaConfig: {
     manaMax: number;
 };

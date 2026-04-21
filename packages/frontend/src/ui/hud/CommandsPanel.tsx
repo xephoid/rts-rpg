@@ -15,6 +15,8 @@ import {
   robotBuildingStats,
   wizardBuildingStats,
   wizardUnitStats,
+  robotUnitStats,
+  illusionistInvisibilityResearchKey,
 } from "@neither/shared";
 import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
@@ -53,6 +55,13 @@ export function CommandsPanel() {
   const issueDetach = useUIStore((s) => s.issueDetach);
   const issueEjectOccupants = useUIStore((s) => s.issueEjectOccupants);
   const issueManaShieldToggle = useUIStore((s) => s.issueManaShieldToggle);
+  const issueInvisibilityToggle = useUIStore((s) => s.issueInvisibilityToggle);
+  const issueDisguiseAction = useUIStore((s) => s.issueDisguise);
+  const issueClearDisguise = useUIStore((s) => s.issueClearDisguise);
+  const issueLeaveHiding = useUIStore((s) => s.issueLeaveHiding);
+  const issueInfiltrateAttack = useUIStore((s) => s.issueInfiltrateAttack);
+  const disguisePickerUnitId = useUIStore((s) => s.disguisePickerUnitId);
+  const setDisguisePickerUnitId = useUIStore((s) => s.setDisguisePickerUnitId);
   const pendingSpell = useUIStore((s) => s.pendingSpell);
   const setPendingSpell = useUIStore((s) => s.setPendingSpell);
   const buildMenuOpen = useUIStore((s) => s.buildMenuOpen);
@@ -449,6 +458,19 @@ export function CommandsPanel() {
             );
           }
 
+          if (entity.typeKey === "illusionist" && completed.includes(illusionistInvisibilityResearchKey)) {
+            buttons.push(
+              <button
+                key="Invisibility"
+                className={`${styles.cmdBtn}${entity.invisible ? ` ${styles.cmdBtnActive}` : ""}`}
+                onClick={() => issueInvisibilityToggle(entity.id)}
+                title={entity.invisible ? "Drop Invisibility" : "Go Invisible (mana drain)"}
+              >
+                Invisible
+              </button>
+            );
+          }
+
           if (entity.typeKey === "evoker") {
             if (completed.includes("iceBlast")) {
               const active = pendingSpell?.kind === "iceBlast" && pendingSpell.casterId === entity.id;
@@ -508,6 +530,110 @@ export function CommandsPanel() {
           }
 
           return buttons.length > 0 ? <>{buttons}</> : null;
+        })()}
+        {selection.mode === "single" && selection.kind === "unit" && (() => {
+          const entity = gameState?.entities.find((e) => e.id === selection.id);
+          if (!entity || entity.faction !== "robots") return null;
+          const buttons = [];
+
+          if (entity.typeKey === "infiltrationPlatform") {
+            if (disguisePickerUnitId === entity.id) {
+              // Inline picker — list opposing (wizard) unit typeKeys.
+              buttons.push(
+                <button
+                  key="DisguisePickerClose"
+                  className={styles.cmdBtn}
+                  onClick={() => setDisguisePickerUnitId(null)}
+                  title="Close disguise picker"
+                >
+                  Cancel
+                </button>
+              );
+              for (const targetKey of Object.keys(wizardUnitStats)) {
+                buttons.push(
+                  <button
+                    key={`Disguise-${targetKey}`}
+                    className={styles.cmdBtn}
+                    onClick={() => issueDisguiseAction(entity.id, targetKey)}
+                    title={`Disguise as ${formatTypeKey(targetKey)}`}
+                  >
+                    {formatTypeKey(targetKey)}
+                  </button>
+                );
+              }
+            } else if (entity.disguised) {
+              buttons.push(
+                <button
+                  key="DropDisguise"
+                  className={`${styles.cmdBtn} ${styles.cmdBtnActive}`}
+                  onClick={() => issueClearDisguise(entity.id)}
+                  title={`Disguised as ${formatTypeKey(entity.displayTypeKey ?? "?")} — click to drop`}
+                >
+                  Drop Disguise
+                </button>
+              );
+            } else {
+              buttons.push(
+                <button
+                  key="Disguise"
+                  className={styles.cmdBtn}
+                  onClick={() => setDisguisePickerUnitId(entity.id)}
+                  title="Disguise as an enemy unit"
+                >
+                  Disguise
+                </button>
+              );
+            }
+          }
+
+          return buttons.length > 0 ? <>{buttons}</> : null;
+        })()}
+        {selection.mode === "single" && selection.kind === "unit" && (() => {
+          // Leave Hiding button for own-faction units currently hidden in Cottage/RechargeStation.
+          const entity = gameState?.entities.find((e) => e.id === selection.id);
+          if (!entity || entity.faction !== activeFaction || !entity.hidden) return null;
+          return (
+            <button
+              key="LeaveHiding"
+              className={styles.cmdBtn}
+              onClick={() => issueLeaveHiding(entity.id)}
+              title="Leave cover"
+            >
+              Leave Cover
+            </button>
+          );
+        })()}
+        {selection.mode === "single" && selection.kind === "unit" && (() => {
+          // Infiltrator inside an enemy Cottage/RS → list hidden occupants so the
+          // player can attack them one at a time (force-out per spec).
+          const entity = gameState?.entities.find((e) => e.id === selection.id);
+          if (!entity || entity.faction !== activeFaction) return null;
+          if (!entity.inEnemyBuilding || !entity.containingBuildingId) return null;
+          const buildingId = entity.containingBuildingId;
+          const occupants = (gameState?.entities ?? []).filter(
+            (e) => e.kind === "unit" && e.hidden && e.containingBuildingId === buildingId,
+          );
+          if (occupants.length === 0) {
+            return (
+              <div className={styles.empty} title="Building is empty">
+                No occupants
+              </div>
+            );
+          }
+          return (
+            <>
+              {occupants.map((o) => (
+                <button
+                  key={`AttackOcc-${o.id}`}
+                  className={styles.cmdBtn}
+                  onClick={() => issueInfiltrateAttack(entity.id, o.id)}
+                  title={`Attack ${o.name ?? formatTypeKey(o.typeKey)}`}
+                >
+                  Attack {o.name ?? formatTypeKey(o.typeKey)}
+                </button>
+              ))}
+            </>
+          );
         })()}
       </div>
     </div>

@@ -18,6 +18,14 @@ export declare const BUILDER_UNIT_TYPES: Set<string>;
 export declare const SINGLE_USE_BUILDERS: Set<string>;
 /** Buildings whose HP contributes to Defense faction stat. */
 export declare const DEFENSIVE_BUILDING_TYPES: Set<string>;
+/** Buildings a friendly hideable unit can enter to hide from opponents. */
+export declare const HIDING_CAPABLE_BUILDINGS: Set<string>;
+/** Unit typeKeys that can hide inside HIDING_CAPABLE_BUILDINGS. */
+export declare const HIDEABLE_UNIT_TYPES: Set<string>;
+/** Tuning for the hide-in-building system. */
+export declare const hidingBuildingConfig: {
+    hiddenCapacityOverride: number;
+};
 /**
  * Which buildings can accept resources for each resource type.
  * Gatherers only drop off at buildings in this list for the relevant resource.

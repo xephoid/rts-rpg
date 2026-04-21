@@ -26,5 +26,22 @@ export const uiText = {
         unexplored: "Unexplored",
         explored: "Explored",
     },
+    spy: {
+        invisibilityOn: "Invisibility",
+        invisibilityOff: "Drop Invisibility",
+        disguise: "Disguise",
+        dropDisguise: "Drop Disguise",
+        pickDisguise: "Pick a unit to disguise as",
+        hide: "Hide",
+        leaveHiding: "Leave Building",
+        infiltrate: "Infiltrate",
+        attackOccupant: "Attack Occupant",
+        alertHide: (unitName, buildingName) => `${unitName} hid in ${buildingName}`,
+        alertConverted: (unitName) => `${unitName} was captured and converted`,
+        alertForcedOut: (unitName) => `${unitName} was forced out of cover`,
+        alertTempControlled: (unitName) => `${unitName} is under temporary control`,
+        alertTempControlExpired: (unitName) => `${unitName} is no longer under control`,
+        alertDetected: (unitName) => `${unitName} detected a concealed enemy`,
+    },
 };
 //# sourceMappingURL=uiText.js.map

@@ -33,6 +33,8 @@ import {
   xpRates,
   manaGen,
   spellCosts,
+  illusionistInvisibilityResearchKey,
+  illusionistTempControlDurationTicks,
   spellEffects,
   clericConfig,
   manaConfig,
@@ -42,6 +44,10 @@ import {
   MILITARY_ROLES,
   CIVILIAN_UNIT_TYPES,
   DEFENSIVE_BUILDING_TYPES,
+  HIDING_CAPABLE_BUILDINGS,
+  HIDEABLE_UNIT_TYPES,
+  hidingBuildingConfig,
+  uiText,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
@@ -812,8 +818,9 @@ export class GameEngine {
   }
 
   /** Building-side eject: the garrisoned unit (wizardTower) or all occupant Cores
-   *  (immobileCombatPlatform) exit. Called from the building's commands panel
-   *  since the occupants are invisible on the map and can't be right-clicked. */
+   *  (immobileCombatPlatform) exit, and any units hiding in a Cottage/Recharge Station
+   *  leave their cover. Called from the building's commands panel since the occupants
+   *  are invisible on the map and can't be right-clicked. */
   issueEjectOccupantsOrder(buildingId: string): void {
     const entity = this.entities.get(buildingId);
     if (!entity || entity.kind !== "building") return;
@@ -823,9 +830,135 @@ export class GameEngine {
     }
     if (building.occupantIds.size > 0) {
       for (const id of [...building.occupantIds]) {
-        this.issueLeavePlatformOrder(id);
+        const occupantEntity = this.entities.get(id);
+        if (!occupantEntity || occupantEntity.kind !== "unit") continue;
+        const occupant = occupantEntity as UnitEntity;
+        if (occupant.state.kind === "hidingInBuilding") {
+          this.issueLeaveHidingOrder(id);
+        } else if (occupant.state.kind === "inPlatform") {
+          this.issueLeavePlatformOrder(id);
+        }
       }
     }
+  }
+
+  /** Civilian / leader enters a friendly Cottage or Recharge Station to hide from
+   *  opposing vision. Unit stays inside until ordered out or forced out by a spy. */
+  issueHideOrder(unitId: string, buildingId: string): void {
+    const unitEntity = this.entities.get(unitId);
+    if (!unitEntity || unitEntity.kind !== "unit") return;
+    const unit = unitEntity as UnitEntity;
+    if (!HIDEABLE_UNIT_TYPES.has(unit.typeKey)) return;
+    if (unit.state.kind === "platformShell" || unit.state.kind === "hidingInBuilding") return;
+
+    const buildingEntity = this.entities.get(buildingId);
+    if (!buildingEntity || buildingEntity.kind !== "building") return;
+    const building = buildingEntity as BuildingEntity;
+    if (!HIDING_CAPABLE_BUILDINGS.has(building.typeKey)) return;
+    if (!building.isOperational) return;
+    if (building.faction !== unit.faction) return;
+    if (building.occupantIds.size >= hidingBuildingConfig.hiddenCapacityOverride) return;
+
+    this._releaseDepositOccupancy(unit);
+    const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+    const goal = this._nearestAttachTile(building.position, unit.position);
+    if (!goal) return;
+    const path = this._findPathForUnit(unit, start, goal) ?? findPath(this.grid, start, goal);
+    if (path === null) return;
+    unit.state = { kind: "hideMove", buildingId: building.id, path, yieldTicks: 0 };
+  }
+
+  /** Exit a hiding-in-building unit onto an adjacent tile. */
+  issueLeaveHidingOrder(unitId: string): void {
+    const unitEntity = this.entities.get(unitId);
+    if (!unitEntity || unitEntity.kind !== "unit") return;
+    const unit = unitEntity as UnitEntity;
+    if (unit.state.kind !== "hidingInBuilding") return;
+
+    const buildingEntity = this.entities.get(unit.state.buildingId);
+    const building = buildingEntity?.kind === "building" ? (buildingEntity as BuildingEntity) : null;
+    const anchor = building?.position ?? unit.position;
+
+    const eject = this._findEjectTile(anchor, unit.id) ?? { x: Math.round(anchor.x) + 1, y: Math.round(anchor.y) };
+    unit.position = eject;
+    unit.state = { kind: "idle" };
+    if (building) {
+      building.occupantIds.delete(unit.id);
+      this._releaseFromBuilding(unit, building, 0);
+    }
+  }
+
+  /** Spy infiltrates an enemy Cottage / Recharge Station. On arrival the force-out
+   *  handler runs: Illusionist converts + ejects all hidden occupants; Infiltration
+   *  Platform enters and waits for player-issued attacks on occupants. */
+  issueInfiltrateOrder(spyId: string, buildingId: string): void {
+    const unitEntity = this.entities.get(spyId);
+    if (!unitEntity || unitEntity.kind !== "unit") return;
+    const unit = unitEntity as UnitEntity;
+    if (unit.typeKey !== "illusionist" && unit.typeKey !== "infiltrationPlatform") return;
+
+    const buildingEntity = this.entities.get(buildingId);
+    if (!buildingEntity || buildingEntity.kind !== "building") return;
+    const building = buildingEntity as BuildingEntity;
+    if (!HIDING_CAPABLE_BUILDINGS.has(building.typeKey)) return;
+    if (!building.isOperational) return;
+    if (building.faction === unit.faction) return;
+
+    this._releaseDepositOccupancy(unit);
+    const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+    const goal = this._nearestAttachTile(building.position, unit.position);
+    if (!goal) return;
+    const path = this._findPathForUnit(unit, start, goal) ?? findPath(this.grid, start, goal);
+    if (path === null) return;
+    unit.state = { kind: "infiltrateBuilding", buildingId: building.id, path, yieldTicks: 0 };
+  }
+
+  /**
+   * Infiltration Platform attack-from-inside. The platform must be in `inEnemyBuilding`
+   * state and the target must be a hiding occupant of the same building. On hit the
+   * occupant is ejected to an adjacent tile still hostile; if HP drops to 0 the
+   * standard death handler runs.
+   */
+  issueInfiltrateAttack(platformId: string, occupantId: string): void {
+    const platformEntity = this.entities.get(platformId);
+    if (!platformEntity || platformEntity.kind !== "unit") return;
+    const platform = platformEntity as UnitEntity;
+    if (platform.typeKey !== "infiltrationPlatform") return;
+    if (platform.state.kind !== "inEnemyBuilding") return;
+    if (platform.attackCooldownTicks > 0) return;
+
+    const occupantEntity = this.entities.get(occupantId);
+    if (!occupantEntity || occupantEntity.kind !== "unit") return;
+    const occupant = occupantEntity as UnitEntity;
+    if (occupant.state.kind !== "hidingInBuilding") return;
+    if (occupant.state.buildingId !== platform.state.buildingId) return;
+
+    const buildingEntity = this.entities.get(platform.state.buildingId);
+    if (!buildingEntity || buildingEntity.kind !== "building") return;
+    const building = buildingEntity as BuildingEntity;
+
+    const dmg = Math.max(1, platform.stats.damage - occupant.stats.armor);
+    occupant.stats.hp -= dmg;
+
+    // Always eject on hit — forces the target out of cover regardless of survival.
+    const eject = this._findEjectTile(building.position, occupant.id);
+    if (eject) occupant.position = eject;
+    building.occupantIds.delete(occupant.id);
+    occupant.state = { kind: "idle" };
+
+    this._attackEvents.push({
+      attackerId: platform.id,
+      targetId: occupant.id,
+      attackerPos: { ...platform.position },
+      targetPos: { ...occupant.position },
+      ranged: false,
+    });
+    this.onAlert?.(uiText.spy.alertForcedOut(occupant.name ?? occupant.typeKey));
+
+    const platformStats = robotUnitStats[platform.typeKey];
+    platform.attackCooldownTicks = Math.round((platformStats?.attackIntervalSec ?? 1.0) * TICKS_PER_SEC);
+
+    if (occupant.stats.hp <= 0) this._handleEntityDeath(occupant, platform.id);
   }
 
   issueBuildOrder(unitId: string, buildingTypeKey: string, topLeft: Vec2): void {
@@ -1057,7 +1190,7 @@ export class GameEngine {
   private _processMovement(): void {
     for (const unit of this.entities.units()) {
       const kind = unit.state.kind;
-      if (kind === "moving" || kind === "patrolling" || kind === "gatherMove" || kind === "dropoffMove" || kind === "buildMove" || kind === "attacking" || kind === "attachMove" || kind === "following" || kind === "garrisonMove" || kind === "enterPlatformMove") {
+      if (kind === "moving" || kind === "patrolling" || kind === "gatherMove" || kind === "dropoffMove" || kind === "buildMove" || kind === "attacking" || kind === "attachMove" || kind === "following" || kind === "garrisonMove" || kind === "enterPlatformMove" || kind === "hideMove" || kind === "infiltrateBuilding") {
         this._advanceUnit(unit, TICK_MS / 1000);
       }
     }
@@ -1190,7 +1323,9 @@ export class GameEngine {
       state.kind !== "attachMove" &&
       state.kind !== "following" &&
       state.kind !== "garrisonMove" &&
-      state.kind !== "enterPlatformMove"
+      state.kind !== "enterPlatformMove" &&
+      state.kind !== "hideMove" &&
+      state.kind !== "infiltrateBuilding"
     ) return;
     if (state.kind === "attacking" && state.path.length === 0) return;
     if (state.kind === "following" && state.path.length === 0) return;
@@ -1236,7 +1371,8 @@ export class GameEngine {
              blocker.state.kind === "gatherMove" || blocker.state.kind === "dropoffMove" ||
              blocker.state.kind === "buildMove" || blocker.state.kind === "attacking" ||
              blocker.state.kind === "attachMove" || blocker.state.kind === "following" ||
-             blocker.state.kind === "garrisonMove" || blocker.state.kind === "enterPlatformMove")
+             blocker.state.kind === "garrisonMove" || blocker.state.kind === "enterPlatformMove" ||
+             blocker.state.kind === "hideMove" || blocker.state.kind === "infiltrateBuilding")
               ? blocker.state.path[0]
               : undefined;
           const headOn = blockerNext && blockerNext.x === cur.x && blockerNext.y === cur.y;
@@ -1306,7 +1442,8 @@ export class GameEngine {
       // Approach moves with yieldTicks > 0 are in a retry-wait after a failed replan
       const isApproach = state.kind === "gatherMove" || state.kind === "dropoffMove" ||
         state.kind === "garrisonMove" || state.kind === "attachMove" || state.kind === "buildMove" ||
-        state.kind === "enterPlatformMove";
+        state.kind === "enterPlatformMove" || state.kind === "hideMove" ||
+        state.kind === "infiltrateBuilding";
       if (isApproach && state.yieldTicks > 0) {
         state.yieldTicks--;
         if (state.yieldTicks === 0) this._replanUnit(unit);
@@ -1417,7 +1554,106 @@ export class GameEngine {
         this._absorbIntoBuilding(unit, platform);
         break;
       }
+
+      case "hideMove": {
+        const building = this.entities.get(state.buildingId) as BuildingEntity | undefined;
+        if (
+          !building ||
+          !HIDING_CAPABLE_BUILDINGS.has(building.typeKey) ||
+          !building.isOperational ||
+          building.faction !== unit.faction ||
+          building.occupantIds.size >= hidingBuildingConfig.hiddenCapacityOverride
+        ) {
+          unit.state = { kind: "idle" };
+          break;
+        }
+        unit.position = { ...building.position };
+        building.occupantIds.add(unit.id);
+        unit.state = { kind: "hidingInBuilding", buildingId: building.id };
+        this._absorbIntoBuilding(unit, building);
+        break;
+      }
+
+      case "infiltrateBuilding": {
+        const building = this.entities.get(state.buildingId) as BuildingEntity | undefined;
+        if (
+          !building ||
+          !HIDING_CAPABLE_BUILDINGS.has(building.typeKey) ||
+          !building.isOperational ||
+          building.faction === unit.faction
+        ) {
+          unit.state = { kind: "idle" };
+          break;
+        }
+        this._onSpyArrivedAtEnemyBuilding(unit, building);
+        break;
+      }
     }
+  }
+
+  /**
+   * Spy arrived at an enemy hiding-capable building. Illusionist converts all hidden
+   * occupants on the spot and then stands idle adjacent; Infiltration Platform enters
+   * the building and waits for the player to target occupants via `issueInfiltrateAttack`.
+   */
+  private _onSpyArrivedAtEnemyBuilding(unit: UnitEntity, building: BuildingEntity): void {
+    if (unit.typeKey === "illusionist") {
+      for (const occupantId of [...building.occupantIds]) {
+        const occupantEntity = this.entities.get(occupantId);
+        if (!occupantEntity || occupantEntity.kind !== "unit") continue;
+        const occupant = occupantEntity as UnitEntity;
+        if (occupant.state.kind !== "hidingInBuilding") continue;
+        const eject = this._findEjectTile(building.position, occupant.id);
+        if (eject) occupant.position = eject;
+        building.occupantIds.delete(occupant.id);
+        if (!occupant.cannotBeConverted) {
+          // Permanent conversion for civilians.
+          occupant.faction = unit.faction;
+          this.onAlert?.(uiText.spy.alertConverted(occupant.name ?? occupant.typeKey));
+        } else {
+          // Leaders can't be permanently converted — but the Illusionist can
+          // *temporarily* puppet them. Flip faction for `illusionistTempControlDurationTicks`
+          // and remember where to revert.
+          if (occupant.tempControlTicks === 0) occupant.originalFaction = occupant.faction;
+          occupant.faction = unit.faction;
+          occupant.tempControlTicks = illusionistTempControlDurationTicks;
+          this.onAlert?.(uiText.spy.alertTempControlled(occupant.name ?? occupant.typeKey));
+        }
+        occupant.state = { kind: "idle" };
+      }
+      // Illusionist lands idle adjacent to the building footprint.
+      const land = this._findEjectTile(building.position, unit.id);
+      if (land) unit.position = land;
+      unit.state = { kind: "idle" };
+      return;
+    }
+
+    if (unit.typeKey === "infiltrationPlatform") {
+      unit.position = { ...building.position };
+      unit.state = { kind: "inEnemyBuilding", buildingId: building.id };
+      this._absorbIntoBuilding(unit, building);
+      return;
+    }
+
+    unit.state = { kind: "idle" };
+  }
+
+  /** Scan the 8-neighborhood of `buildingPos` for a passable tile that is not already
+   *  occupied by `excludeUnitId`. Returns null if no such tile exists within the
+   *  immediate ring. Used by hide-exit and spy-forced-eject paths. */
+  private _findEjectTile(buildingPos: Vec2, excludeUnitId: string): Vec2 | null {
+    const px = Math.round(buildingPos.x);
+    const py = Math.round(buildingPos.y);
+    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
+    for (const d of dirs) {
+      const tx = px + d.x;
+      const ty = py + d.y;
+      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, excludeUnitId, false)) {
+        return { x: tx, y: ty };
+      }
+    }
+    return null;
   }
 
   /** Garrison semantics: the building acts as a pure shell. Damage goes to the
@@ -1478,7 +1714,9 @@ export class GameEngine {
       state.kind !== "attacking" &&
       state.kind !== "attachMove" &&
       state.kind !== "garrisonMove" &&
-      state.kind !== "enterPlatformMove"
+      state.kind !== "enterPlatformMove" &&
+      state.kind !== "hideMove" &&
+      state.kind !== "infiltrateBuilding"
     ) return;
 
     let targetPosition: Vec2;
@@ -1541,6 +1779,19 @@ export class GameEngine {
       const goal = this._nearestAttachTile(platform.position, unit.position);
       if (!goal) { unit.state = { kind: "idle" }; return; }
       targetPosition = goal;
+    } else if (state.kind === "hideMove" || state.kind === "infiltrateBuilding") {
+      const building = this.entities.get(state.buildingId) as BuildingEntity | undefined;
+      if (!building || !HIDING_CAPABLE_BUILDINGS.has(building.typeKey) || !building.isOperational) {
+        unit.state = { kind: "idle" }; return;
+      }
+      // Hide needs own-faction building; infiltrate needs opposing-faction building.
+      const factionOk = state.kind === "hideMove"
+        ? building.faction === unit.faction
+        : building.faction !== unit.faction;
+      if (!factionOk) { unit.state = { kind: "idle" }; return; }
+      const goal = this._nearestAttachTile(building.position, unit.position);
+      if (!goal) { unit.state = { kind: "idle" }; return; }
+      targetPosition = goal;
     } else {
       targetPosition = state.heading === "toB" ? state.pointB : state.pointA;
     }
@@ -1550,7 +1801,8 @@ export class GameEngine {
     // For gather/dropoff, fall back to terrain-only path if unit-aware pathfinding fails —
     const isApproach = state.kind === "gatherMove" || state.kind === "dropoffMove" ||
       state.kind === "garrisonMove" || state.kind === "attachMove" || state.kind === "buildMove" ||
-      state.kind === "enterPlatformMove";
+      state.kind === "enterPlatformMove" || state.kind === "hideMove" ||
+      state.kind === "infiltrateBuilding";
 
     // avoidTile: temporarily treat the given tile as blocked so we route around it.
     // Used by the block-resolution code to escape head-on collisions with a moving unit.
@@ -2113,6 +2365,31 @@ export class GameEngine {
         for (const u of wizardUnits) u.manaShielded = false;
       }
     }
+
+    const invisibleIllusionists = wizardUnits.filter((u) => u.invisibilityActive);
+    if (invisibleIllusionists.length > 0) {
+      res.mana -= spellCosts.illusionistInvisibilityDrainPerSec * (TICK_MS / 1000) * invisibleIllusionists.length;
+      if (res.mana <= 0) {
+        res.mana = 0;
+        for (const u of invisibleIllusionists) {
+          u.invisibilityActive = false;
+          u.concealed = false;
+        }
+      }
+    }
+  }
+
+  /** Test/dev hook: mark a research item completed without going through a building.
+   *  Keeps /game free of test-only branches while still allowing integration-style unit
+   *  tests that need research-gated abilities unlocked. */
+  grantResearch(faction: Faction, researchKey: string): void {
+    this._completedResearch.get(faction)?.add(researchKey);
+  }
+
+  /** Test/dev hook: advance simulation by one tick synchronously. Bypasses GameLoop's
+   *  real-time scheduler so tests can assert deterministic post-tick state. */
+  stepTick(tickNumber = 0, elapsedMs = 0): void {
+    this.tick(tickNumber, elapsedMs);
   }
 
   issueManaShieldToggle(unitId: string): void {
@@ -2123,6 +2400,42 @@ export class GameEngine {
     if (!this._completedResearch.get("wizards")?.has("manaShield")) return;
     if (!unit.manaShielded && this.resources.wizards.mana <= 0) return;
     unit.manaShielded = !unit.manaShielded;
+  }
+
+  issueInvisibilityToggle(unitId: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    if (unit.typeKey !== "illusionist") return;
+    if (!this._completedResearch.get("wizards")?.has(illusionistInvisibilityResearchKey)) return;
+    if (!unit.invisibilityActive && this.resources.wizards.mana <= 0) return;
+    unit.invisibilityActive = !unit.invisibilityActive;
+    // Mirror onto the legacy `concealed` flag so FogOfWar and the detector scan
+    // treat invisibility the same as structural concealment.
+    unit.concealed = unit.invisibilityActive;
+  }
+
+  /** Infiltration Platform disguise — renders to opponents as the picked enemy typeKey.
+   *  Does NOT set `concealed` (disguised unit still contributes to own fog). */
+  issueDisguise(unitId: string, targetTypeKey: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    if (unit.typeKey !== "infiltrationPlatform") return;
+    // Target typeKey must belong to the opposing faction's unit roster.
+    const enemyRoster = unit.faction === "robots" ? wizardUnitStats : robotUnitStats;
+    if (!(targetTypeKey in enemyRoster)) return;
+    unit.disguiseActive = true;
+    unit.disguiseTargetTypeKey = targetTypeKey;
+  }
+
+  issueClearDisguise(unitId: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    if (unit.typeKey !== "infiltrationPlatform") return;
+    unit.disguiseActive = false;
+    unit.disguiseTargetTypeKey = null;
   }
 
   issueIceBlastOrder(casterId: string, targetId: string): void {
@@ -2216,6 +2529,24 @@ export class GameEngine {
       if (unit.damageBonusTicks <= 0) continue;
       unit.damageBonusTicks--;
       if (unit.damageBonusTicks === 0) unit.damageBonusMultiplier = 1.0;
+    }
+  }
+
+  /** Temporary Illusionist control of a `cannotBeConverted` leader: decrement timer
+   *  each tick, revert faction + clear state when it expires. */
+  private _processTempControlExpiry(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.tempControlTicks <= 0) continue;
+      unit.tempControlTicks--;
+      if (unit.tempControlTicks === 0) {
+        if (unit.originalFaction) {
+          unit.faction = unit.originalFaction;
+          unit.originalFaction = null;
+        }
+        // Break any pending orders that only made sense under the puppeteer.
+        unit.state = { kind: "idle" };
+        this.onAlert?.(uiText.spy.alertTempControlExpired(unit.name ?? unit.typeKey));
+      }
     }
   }
 
@@ -2504,6 +2835,7 @@ export class GameEngine {
     this._processMana();
     this._processSlows();
     this._processBuffExpiry();
+    this._processTempControlExpiry();
     this._processAmphitheatreXp(tick);
     this._processClericHealing(tick);
     this._updateFog(tick);
@@ -2535,7 +2867,64 @@ export class GameEngine {
       attacks: this._attackEvents.splice(0),
       spells: this._spellEvents.splice(0),
       factionStats: this._computeFactionStats(),
+      detectedIds: this._computeDetectedIds(),
     });
+  }
+
+  /**
+   * Per-faction list of enemy unit IDs revealed by a detector this tick.
+   *
+   * Detection model: for each faction F, every F-owned unit whose `isDetector` is true
+   * scans opposing-faction units within `detector.stats.sightRange`. Any opposing unit
+   * that would otherwise be concealed / invisible / disguised / hiding is added to F's
+   * revealed set. The renderer consumes this set via `detectedIds[activeFaction]` to
+   * override the viewer-side filtering pass.
+   *
+   * Excluded from the scan: detector in `platformShell` / `garrisoned` / `inPlatform`
+   * states (those units aren't on the map surface, so they can't sweep anything). Same
+   * for targets already in `platformShell` / `garrisoned` / `inPlatform` — shell-like
+   * states are strictly internal and don't need to be "revealed" to opponents.
+   */
+  private _computeDetectedIds(): Record<Faction, string[]> {
+    const result: Record<Faction, string[]> = { wizards: [], robots: [] };
+
+    const active = (u: UnitEntity) =>
+      u.state.kind !== "platformShell" &&
+      u.state.kind !== "garrisoned" &&
+      u.state.kind !== "inPlatform";
+
+    for (const viewer of FACTIONS) {
+      const detectors = this.entities
+        .unitsByFaction(viewer)
+        .filter((u) => u.isDetector && active(u));
+      if (detectors.length === 0) continue;
+
+      const enemyFaction: Faction = viewer === "wizards" ? "robots" : "wizards";
+      const targets = this.entities.unitsByFaction(enemyFaction).filter((u) => {
+        if (!active(u)) return false;
+        const isHidden =
+          u.concealed ||
+          u.invisibilityActive ||
+          u.disguiseActive ||
+          u.state.kind === "hidingInBuilding" ||
+          u.state.kind === "inEnemyBuilding";
+        return isHidden;
+      });
+
+      const revealed = new Set<string>();
+      for (const t of targets) {
+        for (const d of detectors) {
+          const dx = t.position.x - d.position.x;
+          const dy = t.position.y - d.position.y;
+          if (dx * dx + dy * dy <= d.stats.sightRange * d.stats.sightRange) {
+            revealed.add(t.id);
+            break;
+          }
+        }
+      }
+      result[viewer] = [...revealed];
+    }
+    return result;
   }
 
   private _updateFog(tick: number): void {

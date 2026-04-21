@@ -82,6 +82,26 @@ export type EntitySnapshot = {
   garrisonedUnitId?: string | null;
   /** Number of Cores currently occupying an Immobile Combat Platform (robots-only). */
   occupantCount?: number;
+  /** Number of units currently hiding inside this building (Cottage / Recharge Station). */
+  hiddenOccupantCount?: number;
+  /** True while unit has Illusionist invisibility active. */
+  invisible?: boolean;
+  /** True while unit is an Infiltration Platform with disguise active. */
+  disguised?: boolean;
+  /** Real faction of a disguised unit — always the unit's actual owner. Renderer uses this + displayFaction to decide the viewer-dependent sprite. */
+  displayFaction?: Faction;
+  /** Unit typeKey to render to opponents when disguise is active. */
+  displayTypeKey?: string;
+  /** True while unit is hiding inside a friendly Cottage / Recharge Station. */
+  hidden?: boolean;
+  /** True while an Infiltration Platform is occupying an enemy hiding-capable building. */
+  inEnemyBuilding?: boolean;
+  /** Set when unit is hidden or inEnemyBuilding — id of the containing building. Used by UI
+   *  to list occupants (for infiltrator attack-from-inside) and link hide-exit commands. */
+  containingBuildingId?: string;
+  /** True while this unit is temporarily controlled by an opposing Illusionist.
+   *  `faction` reads as the puppeteer's faction until the effect expires. */
+  tempControlled?: boolean;
 };
 
 export type TileSnapshot = {
@@ -150,4 +170,10 @@ export type GameStateSnapshot = {
   /** Spells cast this tick — used by renderer for spell visual effects. */
   spells?: SpellEvent[];
   factionStats: Record<Faction, FactionStats>;
+  /**
+   * Per-faction set of enemy unit IDs currently revealed by a detector.
+   * Renderer uses `detectedIds[activeFaction]` to override invisibility/disguise
+   * when presenting enemy units to the viewer.
+   */
+  detectedIds: Record<Faction, string[]>;
 };

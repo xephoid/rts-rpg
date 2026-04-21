@@ -15,7 +15,8 @@ export function _resetEntityIdCounter(): void {
 export abstract class Entity {
   readonly id: string;
   readonly kind: EntityKind;
-  readonly faction: Faction;
+  /** Mutable so conversion mechanics (Illusionist force-out, diplomacy Talk) can flip ownership. */
+  faction: Faction;
   readonly typeKey: string;
   position: Vec2;
   readonly stats: StatBlock;

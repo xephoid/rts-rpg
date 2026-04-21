@@ -1,4 +1,5 @@
 import type { Faction, Vec2 } from "@neither/shared";
+import { CONCEALED_TYPES, DETECTOR_TYPES } from "@neither/shared";
 import { Entity } from "./Entity.js";
 import type { StatBlockInit } from "./StatBlock.js";
 
@@ -19,12 +20,11 @@ export type UnitState =
   | { kind: "garrisoned"; buildingId: string }
   | { kind: "enterPlatformMove"; platformId: string; path: Vec2[]; yieldTicks: number }
   | { kind: "inPlatform"; platformId: string }
+  | { kind: "hideMove"; buildingId: string; path: Vec2[]; yieldTicks: number }
+  | { kind: "hidingInBuilding"; buildingId: string }
+  | { kind: "infiltrateBuilding"; buildingId: string; path: Vec2[]; yieldTicks: number }
+  | { kind: "inEnemyBuilding"; buildingId: string }
   | { kind: "platformShell" };
-
-/** Unit types that can conceal themselves from standard vision. */
-const CONCEALED_TYPES = new Set(["infiltrationPlatform", "illusionist"]);
-/** Unit types that reveal concealed enemies within range. */
-const DETECTOR_TYPES = new Set(["probePlatform", "enchantress"]);
 
 export class UnitEntity extends Entity {
   state: UnitState = { kind: "idle" };
@@ -42,8 +42,18 @@ export class UnitEntity extends Entity {
   /** Set on a platform entity when a Core is riding inside it. */
   attachedCoreId: string | null = null;
 
-  /** True while this unit is actively concealing itself. */
+  /** True while this unit is actively concealing itself. Mirrors `invisibilityActive`
+   *  for Illusionist and `disguiseActive` for Infiltration Platform so FogOfWar sees
+   *  a single flag to suppress vision contribution from cloaked units. */
   concealed = false;
+
+  /** True while Illusionist invisibility is toggled on. Drains mana each tick. */
+  invisibilityActive = false;
+
+  /** True while Infiltration Platform disguise is toggled on. */
+  disguiseActive = false;
+  /** Enemy unit typeKey this Infiltration Platform is impersonating. */
+  disguiseTargetTypeKey: string | null = null;
 
   /** True while this wizard unit has Mana Shield active. */
   manaShielded = false;
@@ -57,6 +67,13 @@ export class UnitEntity extends Entity {
   damageBonusTicks: number = 0;
   /** Outgoing damage multiplier (Enlarge >1, Reduce <1, normal = 1.0). */
   damageBonusMultiplier: number = 1.0;
+
+  /** Ticks remaining on temporary Illusionist control of an otherwise-unconvertible leader.
+   *  0 = not under temp control. While > 0, `faction` is the puppeteer's faction and
+   *  `originalFaction` holds the faction to revert to. */
+  tempControlTicks: number = 0;
+  /** The faction this unit will revert to when `tempControlTicks` reaches zero. */
+  originalFaction: Faction | null = null;
 
   /** True if this unit type can detect concealed enemies. */
   readonly isDetector: boolean;
@@ -86,8 +103,10 @@ export class UnitEntity extends Entity {
     this.canAttackAir = params.canAttackAir ?? false;
     this.cannotBeConverted = params.cannotBeConverted ?? false;
     this.baseSpeed = this.stats.speed;
-    // Concealment-capable units start concealed by default
-    if (CONCEALED_TYPES.has(params.typeKey)) this.concealed = true;
+    // Concealment is now explicitly toggled via abilities (Illusionist invisibility).
+    // `CONCEALED_TYPES` is retained to gate which typeKeys may toggle concealment,
+    // not to auto-apply it at spawn.
+    void CONCEALED_TYPES; // referenced for side-effect import; actual gating lives in GameEngine.
   }
 
   private _actionLabel(): string {
@@ -108,6 +127,10 @@ export class UnitEntity extends Entity {
       case "garrisoned":   return "Garrisoned";
       case "enterPlatformMove": return "Entering Platform";
       case "inPlatform":   return "Occupying Platform";
+      case "hideMove":     return "Moving to Cover";
+      case "hidingInBuilding": return "Hiding";
+      case "infiltrateBuilding": return "Infiltrating";
+      case "inEnemyBuilding":  return "Inside Enemy Building";
       default:             return "";
     }
   }
@@ -127,6 +150,19 @@ export class UnitEntity extends Entity {
       reduced: (this.damageBonusTicks > 0 && this.damageBonusMultiplier < 1) || undefined,
       garrisoned: this.state.kind === "garrisoned" || undefined,
       inPlatform: this.state.kind === "inPlatform" || undefined,
+      invisible: this.invisibilityActive || undefined,
+      disguised: this.disguiseActive || undefined,
+      displayFaction: this.disguiseActive
+        ? (this.faction === "wizards" ? "robots" : "wizards")
+        : undefined,
+      displayTypeKey: this.disguiseActive ? (this.disguiseTargetTypeKey ?? undefined) : undefined,
+      hidden: this.state.kind === "hidingInBuilding" || undefined,
+      inEnemyBuilding: this.state.kind === "inEnemyBuilding" || undefined,
+      containingBuildingId:
+        this.state.kind === "hidingInBuilding" || this.state.kind === "inEnemyBuilding"
+          ? this.state.buildingId
+          : undefined,
+      tempControlled: this.tempControlTicks > 0 || undefined,
       unitAction: this.state.kind !== "platformShell" ? this._actionLabel() : undefined,
     };
   }

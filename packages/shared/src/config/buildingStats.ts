@@ -46,6 +46,22 @@ export const DEFENSIVE_BUILDING_TYPES = new Set([
   "wall", "wizardTower", "immobileCombatPlatform",
 ]);
 
+/** Buildings a friendly hideable unit can enter to hide from opponents. */
+export const HIDING_CAPABLE_BUILDINGS = new Set(["cottage", "rechargeStation"]);
+
+/** Unit typeKeys that can hide inside HIDING_CAPABLE_BUILDINGS. */
+export const HIDEABLE_UNIT_TYPES = new Set([
+  "subject", "core",        // civilians
+  "archmage", "motherboard", // named leaders
+]);
+
+/** Tuning for the hide-in-building system. */
+export const hidingBuildingConfig = {
+  // Initial guess: Cottage/RechargeStation can host up to 8 hidden units regardless
+  // of their base `occupantCapacity` (which governs production/garrison semantics).
+  hiddenCapacityOverride: 8,
+};
+
 /**
  * Which buildings can accept resources for each resource type.
  * Gatherers only drop off at buildings in this list for the relevant resource.

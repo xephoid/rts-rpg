@@ -71,6 +71,10 @@ export class BuildingEntity extends Entity {
           : null,
       garrisonedUnitId: this.garrisonedUnitId ?? undefined,
       occupantCount: this.occupantIds.size || undefined,
+      // hiddenOccupantCount is distinct from `occupantCount` semantically — both use the
+      // same `occupantIds` Set physically. GameEngine fills in this field on snapshot
+      // emission because the building alone can't tell which occupants are in
+      // `hidingInBuilding` state vs `inPlatform`.
     };
   }
 

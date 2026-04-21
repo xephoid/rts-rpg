@@ -115,6 +115,41 @@ export type UIStore = {
   issueManaShieldToggle: (unitId: string) => void;
   clearPendingManaShieldToggle: () => void;
 
+  /** Illusionist invisibility toggle. */
+  pendingInvisibilityToggle: string | null;
+  issueInvisibilityToggle: (unitId: string) => void;
+  clearPendingInvisibilityToggle: () => void;
+
+  /** Infiltration Platform disguise — picker UI shows enemy roster; on pick we issue. */
+  disguisePickerUnitId: string | null;
+  setDisguisePickerUnitId: (unitId: string | null) => void;
+
+  pendingDisguise: { unitId: string; targetTypeKey: string } | null;
+  issueDisguise: (unitId: string, targetTypeKey: string) => void;
+  clearPendingDisguise: () => void;
+
+  pendingClearDisguise: string | null;
+  issueClearDisguise: (unitId: string) => void;
+  clearPendingClearDisguise: () => void;
+
+  /** Hide-in-building: civilian/leader enters a friendly Cottage or Recharge Station. */
+  pendingHideOrder: { unitId: string; buildingId: string } | null;
+  issueHideOrder: (unitId: string, buildingId: string) => void;
+  clearPendingHideOrder: () => void;
+
+  pendingLeaveHiding: string | null;
+  issueLeaveHiding: (unitId: string) => void;
+  clearPendingLeaveHiding: () => void;
+
+  /** Spy infiltrates an enemy hiding-capable building. */
+  pendingInfiltrate: { spyId: string; buildingId: string } | null;
+  issueInfiltrate: (spyId: string, buildingId: string) => void;
+  clearPendingInfiltrate: () => void;
+
+  pendingInfiltrateAttack: { platformId: string; occupantId: string } | null;
+  issueInfiltrateAttack: (platformId: string, occupantId: string) => void;
+  clearPendingInfiltrateAttack: () => void;
+
   /** Active spell targeting mode — set when a spell button is clicked. Cleared on cast or Escape. */
   pendingSpell: { kind: "iceBlast" | "fieryExplosion" | "enlarge" | "reduce"; casterId: string } | null;
   setPendingSpell: (spell: UIStore["pendingSpell"]) => void;
@@ -224,6 +259,39 @@ export const useUIStore = create<UIStore>((set) => ({
   pendingManaShieldToggle: null,
   issueManaShieldToggle: (unitId) => set({ pendingManaShieldToggle: unitId }),
   clearPendingManaShieldToggle: () => set({ pendingManaShieldToggle: null }),
+
+  pendingInvisibilityToggle: null,
+  issueInvisibilityToggle: (unitId) => set({ pendingInvisibilityToggle: unitId }),
+  clearPendingInvisibilityToggle: () => set({ pendingInvisibilityToggle: null }),
+
+  disguisePickerUnitId: null,
+  setDisguisePickerUnitId: (unitId) => set({ disguisePickerUnitId: unitId }),
+
+  pendingDisguise: null,
+  issueDisguise: (unitId, targetTypeKey) =>
+    set({ pendingDisguise: { unitId, targetTypeKey }, disguisePickerUnitId: null }),
+  clearPendingDisguise: () => set({ pendingDisguise: null }),
+
+  pendingClearDisguise: null,
+  issueClearDisguise: (unitId) => set({ pendingClearDisguise: unitId }),
+  clearPendingClearDisguise: () => set({ pendingClearDisguise: null }),
+
+  pendingHideOrder: null,
+  issueHideOrder: (unitId, buildingId) => set({ pendingHideOrder: { unitId, buildingId } }),
+  clearPendingHideOrder: () => set({ pendingHideOrder: null }),
+
+  pendingLeaveHiding: null,
+  issueLeaveHiding: (unitId) => set({ pendingLeaveHiding: unitId }),
+  clearPendingLeaveHiding: () => set({ pendingLeaveHiding: null }),
+
+  pendingInfiltrate: null,
+  issueInfiltrate: (spyId, buildingId) => set({ pendingInfiltrate: { spyId, buildingId } }),
+  clearPendingInfiltrate: () => set({ pendingInfiltrate: null }),
+
+  pendingInfiltrateAttack: null,
+  issueInfiltrateAttack: (platformId, occupantId) =>
+    set({ pendingInfiltrateAttack: { platformId, occupantId } }),
+  clearPendingInfiltrateAttack: () => set({ pendingInfiltrateAttack: null }),
 
   pendingSpell: null,
   setPendingSpell: (spell) => set({ pendingSpell: spell }),
