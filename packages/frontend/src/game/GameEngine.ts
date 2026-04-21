@@ -2371,10 +2371,7 @@ export class GameEngine {
       res.mana -= spellCosts.illusionistInvisibilityDrainPerSec * (TICK_MS / 1000) * invisibleIllusionists.length;
       if (res.mana <= 0) {
         res.mana = 0;
-        for (const u of invisibleIllusionists) {
-          u.invisibilityActive = false;
-          u.concealed = false;
-        }
+        for (const u of invisibleIllusionists) u.invisibilityActive = false;
       }
     }
   }
@@ -2410,9 +2407,9 @@ export class GameEngine {
     if (!this._completedResearch.get("wizards")?.has(illusionistInvisibilityResearchKey)) return;
     if (!unit.invisibilityActive && this.resources.wizards.mana <= 0) return;
     unit.invisibilityActive = !unit.invisibilityActive;
-    // Mirror onto the legacy `concealed` flag so FogOfWar and the detector scan
-    // treat invisibility the same as structural concealment.
-    unit.concealed = unit.invisibilityActive;
+    // Deliberately do NOT mirror into `concealed`: an invisible Illusionist must still
+    // contribute its sight range to the owner's fog of war. `invisibilityActive` alone
+    // is what the renderer + detector scan check.
   }
 
   /** Infiltration Platform disguise — renders to opponents as the picked enemy typeKey.

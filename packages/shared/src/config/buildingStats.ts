@@ -94,7 +94,7 @@ export const unitBuildingRequirements: Record<string, string> = {
 export const buildingResearch: Record<string, string[]> = {
   home:                 ["woodToMetal"],
   libraryOfEvocation:   ["iceBlast", "fieryExplosion", "manaShield"],
-  libraryOfIllusion:    ["phantomDecoy", "mindFog"],
+  libraryOfIllusion:    ["phantomDecoy", "invisibility"],
   libraryOfEnchantment: ["strengthenAlly", "weakenFoe"],
 };
 

@@ -15,7 +15,7 @@ export declare const spellCosts: {
     illusionistInvisibilityDrainPerSec: number;
 };
 /** Research key that unlocks Illusionist invisibility (gate via Library of Illusion). */
-export declare const illusionistInvisibilityResearchKey = "mindFog";
+export declare const illusionistInvisibilityResearchKey = "invisibility";
 /**
  * Leader force-out by an Illusionist: `cannotBeConverted` leaders can't be
  * permanently taken over, but they CAN be temporarily puppeted for this many ticks.

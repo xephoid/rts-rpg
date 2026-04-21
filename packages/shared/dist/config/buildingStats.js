@@ -81,7 +81,7 @@ export const unitBuildingRequirements = {
 export const buildingResearch = {
     home: ["woodToMetal"],
     libraryOfEvocation: ["iceBlast", "fieryExplosion", "manaShield"],
-    libraryOfIllusion: ["phantomDecoy", "mindFog"],
+    libraryOfIllusion: ["phantomDecoy", "invisibility"],
     libraryOfEnchantment: ["strengthenAlly", "weakenFoe"],
 };
 /** Buildings a builder can construct. Includes additional main bases (spec: no limit on Castles/Homes). */

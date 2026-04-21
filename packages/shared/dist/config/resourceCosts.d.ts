@@ -58,7 +58,7 @@ export declare const researchCosts: {
         water: number;
         durationSec: number;
     };
-    mindFog: {
+    invisibility: {
         wood: number;
         water: number;
         durationSec: number;

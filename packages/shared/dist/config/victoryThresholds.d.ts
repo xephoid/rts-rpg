@@ -4,7 +4,7 @@ export declare const culturalVictory: {
     questProgressPct: number;
 };
 export declare const technologicalVictory: {
-    requiredItems: readonly ["core", "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform", "spinnerPlatform", "spitterPlatform", "infiltrationPlatform", "largeCombatPlatform", "probePlatform", "wallPlatform", "archmage", "surf", "subject", "evoker", "illusionist", "dragon", "enchantress", "cleric", "woodToMetal", "wizardMissiles", "iceBlast", "fieryExplosion", "manaShield", "phantomDecoy", "mindFog", "strengthenAlly", "weakenFoe"];
+    requiredItems: readonly ["core", "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform", "spinnerPlatform", "spitterPlatform", "infiltrationPlatform", "largeCombatPlatform", "probePlatform", "wallPlatform", "archmage", "surf", "subject", "evoker", "illusionist", "dragon", "enchantress", "cleric", "woodToMetal", "wizardMissiles", "iceBlast", "fieryExplosion", "manaShield", "phantomDecoy", "invisibility", "strengthenAlly", "weakenFoe"];
 };
 export declare const victoryAlert: {
     proximityThresholdPct: number;

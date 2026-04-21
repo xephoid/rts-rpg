@@ -147,7 +147,7 @@ describe("Illusionist invisibility", () => {
   beforeEach(() => {
     engine = makeEngine();
     illusionist = spawnIllusionist(engine);
-    engine.grantResearch("wizards", "mindFog");
+    engine.grantResearch("wizards", "invisibility");
     engine.getResources("wizards").mana = 100;
   });
 
@@ -186,10 +186,12 @@ describe("Illusionist invisibility", () => {
     expect(evoker.invisibilityActive).toBe(false);
   });
 
-  it("toggles on with research + mana and mirrors concealed flag", () => {
+  it("toggles on with research + mana; keeps vision contribution intact", () => {
     engine.issueInvisibilityToggle(illusionist.id);
     expect(illusionist.invisibilityActive).toBe(true);
-    expect(illusionist.concealed).toBe(true);
+    // Intentionally NOT mirrored into `concealed` — otherwise FogOfWar would drop the
+    // Illusionist as a vision source and the owner would go blind on the tile.
+    expect(illusionist.concealed).toBe(false);
   });
 
   it("refuses to toggle on when mana is zero", () => {
@@ -203,7 +205,6 @@ describe("Illusionist invisibility", () => {
     engine.getResources("wizards").mana = 0;
     engine.issueInvisibilityToggle(illusionist.id); // off
     expect(illusionist.invisibilityActive).toBe(false);
-    expect(illusionist.concealed).toBe(false);
   });
 
   it("snapshot exposes invisible field when active", () => {
@@ -437,7 +438,7 @@ describe("Detector reveal", () => {
       onTick: (s) => { captured = s.detectedIds; },
     });
     const il = spawnIllusionist(engine, { x: 10, y: 10 });
-    engine.grantResearch("wizards", "mindFog");
+    engine.grantResearch("wizards", "invisibility");
     engine.getResources("wizards").mana = 50;
     engine.issueInvisibilityToggle(il.id);
     engine.stepTick(0, 0);
@@ -452,7 +453,7 @@ describe("Detector reveal", () => {
       onTick: (s) => { captured = s.detectedIds; },
     });
     const il = spawnIllusionist(engine, { x: 10, y: 10 });
-    engine.grantResearch("wizards", "mindFog");
+    engine.grantResearch("wizards", "invisibility");
     engine.getResources("wizards").mana = 50;
     engine.issueInvisibilityToggle(il.id);
     // Probe Platform within illusionist's position; probePlatform sightRange is 10.
@@ -469,7 +470,7 @@ describe("Detector reveal", () => {
       onTick: (s) => { captured = s.detectedIds; },
     });
     const il = spawnIllusionist(engine, { x: 10, y: 10 });
-    engine.grantResearch("wizards", "mindFog");
+    engine.grantResearch("wizards", "invisibility");
     engine.getResources("wizards").mana = 50;
     engine.issueInvisibilityToggle(il.id);
     // Probe far away — probePlatform sightRange=10, distance ~40.

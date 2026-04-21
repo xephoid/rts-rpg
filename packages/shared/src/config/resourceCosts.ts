@@ -112,7 +112,7 @@ export const researchCosts = {
 
   // Illusionist abilities
   phantomDecoy: { wood: 0, water: 45, durationSec: 35 } satisfies ResearchCost,
-  mindFog: { wood: 0, water: 55, durationSec: 40 } satisfies ResearchCost,
+  invisibility: { wood: 0, water: 55, durationSec: 40 } satisfies ResearchCost,
 
   // Enchantress abilities
   strengthenAlly: { wood: 0, water: 40, durationSec: 30 } satisfies ResearchCost,

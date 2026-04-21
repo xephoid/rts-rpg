@@ -78,7 +78,7 @@ export const researchCosts = {
     manaShield: { wood: 0, water: 80, durationSec: 55 },
     // Illusionist abilities
     phantomDecoy: { wood: 0, water: 45, durationSec: 35 },
-    mindFog: { wood: 0, water: 55, durationSec: 40 },
+    invisibility: { wood: 0, water: 55, durationSec: 40 },
     // Enchantress abilities
     strengthenAlly: { wood: 0, water: 40, durationSec: 30 },
     weakenFoe: { wood: 0, water: 50, durationSec: 38 },

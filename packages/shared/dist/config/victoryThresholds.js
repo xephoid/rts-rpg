@@ -38,7 +38,7 @@ export const technologicalVictory = {
         "fieryExplosion",
         "manaShield",
         "phantomDecoy",
-        "mindFog",
+        "invisibility",
         "strengthenAlly",
         "weakenFoe",
     ],
