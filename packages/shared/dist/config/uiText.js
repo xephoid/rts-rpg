@@ -41,7 +41,7 @@ export const uiText = {
         alertForcedOut: (unitName) => `${unitName} was forced out of cover`,
         alertTempControlled: (unitName) => `${unitName} is under temporary control`,
         alertTempControlExpired: (unitName) => `${unitName} is no longer under control`,
-        alertDetected: (unitName) => `${unitName} detected a concealed enemy`,
+        alertDetected: (unitName) => `${unitName} has been spotted by an enemy detector`,
     },
 };
 //# sourceMappingURL=uiText.js.map

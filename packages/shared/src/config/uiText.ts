@@ -43,6 +43,6 @@ export const uiText = {
     alertForcedOut: (unitName: string) => `${unitName} was forced out of cover`,
     alertTempControlled: (unitName: string) => `${unitName} is under temporary control`,
     alertTempControlExpired: (unitName: string) => `${unitName} is no longer under control`,
-    alertDetected: (unitName: string) => `${unitName} detected a concealed enemy`,
+    alertDetected: (unitName: string) => `${unitName} has been spotted by an enemy detector`,
   },
 } as const;

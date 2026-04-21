@@ -2938,10 +2938,10 @@ export class GameEngine {
               // only on the transition (matches the owner-alert below).
               if (!this._previousDetectedIds[viewer].has(t.id)) {
                 // eslint-disable-next-line no-console
-                console.log(
-                  `[detect] ${d.typeKey}(${d.id}) @ (${d.position.x},${d.position.y}) ` +
+                console.warn(
+                  `[detect] ${d.typeKey}(${d.id}) @ (${d.position.x.toFixed(1)},${d.position.y.toFixed(1)}) ` +
                   `sightRange=${d.stats.sightRange} revealed ${t.typeKey}(${t.id}) ` +
-                  `@ (${t.position.x},${t.position.y}) — dist=${Math.sqrt(dSq).toFixed(2)}`,
+                  `@ (${t.position.x.toFixed(1)},${t.position.y.toFixed(1)}) — dist=${Math.sqrt(dSq).toFixed(2)}`,
                 );
               }
               break;

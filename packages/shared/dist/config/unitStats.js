@@ -84,7 +84,7 @@ export const robotUnitStats = {
         speed: 5.0,
         charisma: 1,
         armorWood: 2,
-        armorMetal: 5,
+        armorMetal: 10,
         capacity: 0,
         attackIntervalSec: 0.8, // Initial guess: fast attacker
     },
@@ -126,8 +126,8 @@ export const robotUnitStats = {
         sightRange: 5, // Initial guess
         speed: 3.0,
         charisma: 0,
-        armorWood: 10,
-        armorMetal: 20,
+        armorWood: 20,
+        armorMetal: 40,
         capacity: 0,
         attackIntervalSec: 2.0, // Initial guess: slow heavy hitter
         canAttackAir: true,
@@ -247,7 +247,7 @@ export const wizardUnitStats = {
         hp: 78,
         damage: 0,
         attackRange: 4,
-        sightRange: 8, // Initial guess
+        sightRange: 5, // Initial guess
         speed: 2.0,
         charisma: 8,
         armor: 3,
@@ -259,7 +259,7 @@ export const wizardUnitStats = {
         hp: 90,
         damage: 0,
         attackRange: 3,
-        sightRange: 8, // Initial guess
+        sightRange: 5, // Initial guess
         speed: 1.8,
         charisma: 10,
         armor: 4,
