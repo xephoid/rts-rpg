@@ -288,7 +288,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     hp: 78,
     damage: 0,
     attackRange: 4,
-    sightRange: 8, // Initial guess
+    sightRange: 5, // Initial guess
     speed: 2.0,
     charisma: 8,
     armor: 3,
@@ -300,7 +300,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     hp: 90,
     damage: 0,
     attackRange: 3,
-    sightRange: 8, // Initial guess
+    sightRange: 5, // Initial guess
     speed: 1.8,
     charisma: 10,
     armor: 4,

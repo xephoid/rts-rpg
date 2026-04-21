@@ -2891,6 +2891,10 @@ export class GameEngine {
 
   /** Cached per-viewer reveal set populated by `_refreshDetectedIds` each tick. */
   private _detectedIdsThisTick: Record<Faction, Set<string>> = { wizards: new Set(), robots: new Set() };
+  /** Per-unit last-tick detection state — used to fire an alert on the transition
+   *  from hidden → revealed so the owning player knows their spy was spotted
+   *  without spamming the alert log every tick the detector stays in range. */
+  private _previousDetectedIds: Record<Faction, Set<string>> = { wizards: new Set(), robots: new Set() };
 
   /**
    * For each faction F, every F-owned detector unit scans opposing-faction units
@@ -2934,6 +2938,22 @@ export class GameEngine {
         }
       }
       this._detectedIdsThisTick[viewer] = set;
+    }
+
+    // Fire a one-shot alert whenever a previously-hidden spy enters a detector's
+    // range. Only alerts for new additions this tick — staying revealed stays quiet.
+    // Alert is sent to the SPY's owning faction so they know the disguise was blown.
+    for (const viewer of FACTIONS) {
+      const prev = this._previousDetectedIds[viewer];
+      const curr = this._detectedIdsThisTick[viewer];
+      for (const id of curr) {
+        if (prev.has(id)) continue;
+        const e = this.entities.get(id);
+        if (!e || e.kind !== "unit") continue;
+        const u = e as UnitEntity;
+        this.onAlert?.(uiText.spy.alertDetected(u.name ?? u.typeKey));
+      }
+      this._previousDetectedIds[viewer] = new Set(curr);
     }
   }
 
