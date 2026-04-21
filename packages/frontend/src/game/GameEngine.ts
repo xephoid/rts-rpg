@@ -1213,6 +1213,7 @@ export class GameEngine {
           if (eu.state.kind === "platformShell" || eu.state.kind === "garrisoned" || eu.state.kind === "inPlatform") continue;
         }
         if (e.kind === "unit" && (e as UnitEntity).isFlying && !unit.canAttackAir) continue;
+        if (!this._isTargetableBy(e, unit.faction)) continue;
         const d = Math.hypot(e.position.x - unit.position.x, e.position.y - unit.position.y);
         if (d <= effectiveRange && d < bestDist) { bestDist = d; bestTarget = e; }
       }
@@ -1285,6 +1286,7 @@ export class GameEngine {
           const eu = e as UnitEntity;
           if (eu.state.kind === "platformShell" || eu.state.kind === "garrisoned" || eu.state.kind === "inPlatform") continue;
         }
+        if (!this._isTargetableBy(e, platform.faction)) continue;
         const d = Math.hypot(e.position.x - platform.position.x, e.position.y - platform.position.y);
         if (d <= attackRange && d < bestDist) { bestDist = d; bestTarget = e; }
       }
@@ -2146,6 +2148,12 @@ export class GameEngine {
           unit.state = { kind: "idle" }; continue;
         }
       }
+      // Concealment check: target may have gone invisible / disguised / into cover
+      // between the order being issued and the attack resolving. Drop the chase if
+      // the attacker's faction can no longer legitimately see it.
+      if (!this._isTargetableBy(target, unit.faction)) {
+        unit.state = { kind: "idle" }; continue;
+      }
 
       const dx = target.position.x - unit.position.x;
       const dy = target.position.y - unit.position.y;
@@ -2216,6 +2224,7 @@ export class GameEngine {
           if (eu.state.kind === "platformShell" || eu.state.kind === "garrisoned" || eu.state.kind === "inPlatform") continue;
           if (eu.isFlying && !unit.canAttackAir) continue;
         }
+        if (!this._isTargetableBy(entity, unit.faction)) continue;
         const dx = entity.position.x - unit.position.x;
         const dy = entity.position.y - unit.position.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -2824,6 +2833,9 @@ export class GameEngine {
     this._processGathering(tick);
     this._processProduction();
     this._processResearch();
+    // Detector reveal must be computed BEFORE any combat routines so invisible/
+    // disguised/hidden targets are filtered consistently for attackers + AI.
+    this._refreshDetectedIds();
     this._processAttacks();
     this._processGarrisonedAttacks();
     this._processImmobileCombatPlatformAttacks();
@@ -2868,60 +2880,78 @@ export class GameEngine {
     });
   }
 
-  /**
-   * Per-faction list of enemy unit IDs revealed by a detector this tick.
-   *
-   * Detection model: for each faction F, every F-owned unit whose `isDetector` is true
-   * scans opposing-faction units within `detector.stats.sightRange`. Any opposing unit
-   * that would otherwise be concealed / invisible / disguised / hiding is added to F's
-   * revealed set. The renderer consumes this set via `detectedIds[activeFaction]` to
-   * override the viewer-side filtering pass.
-   *
-   * Excluded from the scan: detector in `platformShell` / `garrisoned` / `inPlatform`
-   * states (those units aren't on the map surface, so they can't sweep anything). Same
-   * for targets already in `platformShell` / `garrisoned` / `inPlatform` — shell-like
-   * states are strictly internal and don't need to be "revealed" to opponents.
-   */
-  private _computeDetectedIds(): Record<Faction, string[]> {
-    const result: Record<Faction, string[]> = { wizards: [], robots: [] };
+  /** Cached per-viewer reveal set populated by `_refreshDetectedIds` each tick. */
+  private _detectedIdsThisTick: Record<Faction, Set<string>> = { wizards: new Set(), robots: new Set() };
 
+  /**
+   * For each faction F, every F-owned detector unit scans opposing-faction units
+   * within `detector.stats.sightRange`. Any opposing unit that would otherwise be
+   * concealed / invisible / disguised / hiding is added to F's revealed set. The
+   * renderer consumes this via the snapshot; the combat + auto-aggro loops consume
+   * the cached Set directly so they don't have to re-scan every tick.
+   *
+   * Detectors themselves must be on the map surface (not in shell/garrison/platform).
+   */
+  private _refreshDetectedIds(): void {
     const active = (u: UnitEntity) =>
       u.state.kind !== "platformShell" &&
       u.state.kind !== "garrisoned" &&
       u.state.kind !== "inPlatform";
 
     for (const viewer of FACTIONS) {
+      const set = new Set<string>();
       const detectors = this.entities
         .unitsByFaction(viewer)
         .filter((u) => u.isDetector && active(u));
-      if (detectors.length === 0) continue;
-
-      const enemyFaction: Faction = viewer === "wizards" ? "robots" : "wizards";
-      const targets = this.entities.unitsByFaction(enemyFaction).filter((u) => {
-        if (!active(u)) return false;
-        const isHidden =
-          u.concealed ||
-          u.invisibilityActive ||
-          u.disguiseActive ||
-          u.state.kind === "hidingInBuilding" ||
-          u.state.kind === "inEnemyBuilding";
-        return isHidden;
-      });
-
-      const revealed = new Set<string>();
-      for (const t of targets) {
-        for (const d of detectors) {
-          const dx = t.position.x - d.position.x;
-          const dy = t.position.y - d.position.y;
-          if (dx * dx + dy * dy <= d.stats.sightRange * d.stats.sightRange) {
-            revealed.add(t.id);
-            break;
+      if (detectors.length > 0) {
+        const enemyFaction: Faction = viewer === "wizards" ? "robots" : "wizards";
+        for (const t of this.entities.unitsByFaction(enemyFaction)) {
+          if (!active(t)) continue;
+          const concealedLike =
+            t.concealed ||
+            t.invisibilityActive ||
+            t.disguiseActive ||
+            t.state.kind === "hidingInBuilding" ||
+            t.state.kind === "inEnemyBuilding";
+          if (!concealedLike) continue;
+          for (const d of detectors) {
+            const dx = t.position.x - d.position.x;
+            const dy = t.position.y - d.position.y;
+            if (dx * dx + dy * dy <= d.stats.sightRange * d.stats.sightRange) {
+              set.add(t.id);
+              break;
+            }
           }
         }
       }
-      result[viewer] = [...revealed];
+      this._detectedIdsThisTick[viewer] = set;
     }
-    return result;
+  }
+
+  private _computeDetectedIds(): Record<Faction, string[]> {
+    return {
+      wizards: [...this._detectedIdsThisTick.wizards],
+      robots: [...this._detectedIdsThisTick.robots],
+    };
+  }
+
+  /**
+   * Can a unit of `attackerFaction` legitimately acquire `target` as a combat target
+   * this tick? Blocks targeting of:
+   *   - Hidden / in-enemy-building units (they're physically inside a building).
+   *   - Invisible or disguised enemy units unless a friendly detector revealed them.
+   *
+   * Own-faction targets (e.g. healing) pass through; buildings aren't hideable.
+   */
+  private _isTargetableBy(target: Entity, attackerFaction: Faction): boolean {
+    if (target.kind !== "unit") return true;
+    const u = target as UnitEntity;
+    if (u.state.kind === "hidingInBuilding" || u.state.kind === "inEnemyBuilding") return false;
+    if (u.faction === attackerFaction) return true;
+    if (u.invisibilityActive || u.disguiseActive || u.concealed) {
+      return this._detectedIdsThisTick[attackerFaction].has(u.id);
+    }
+    return true;
   }
 
   private _updateFog(tick: number): void {

@@ -25,6 +25,7 @@ import {
   unitBuildingRequirements,
   wizardBuildingCosts,
   wizardBuildingStats,
+  resourceDropoffBuildings,
   TICKS_PER_SEC,
 } from "@neither/shared";
 import type { Entity } from "../entities/Entity.js";
@@ -163,6 +164,11 @@ const CORE_RESERVE = 3;
 const WOOD_STORAGE_MIN_DIST = 15;
 /** Hard cap on wood-storage buildings to prevent the AI from carpeting the map. */
 const MAX_WOOD_STORAGE = 2;
+/** Max one-way distance a gatherer will accept from deposit to its nearest drop-off.
+ *  Farther deposits are deferred until a drop-off (home or woodStorage) lands nearby —
+ *  `_maybeBuildWoodStorage` handles the placement. Prevents the AI from silting its
+ *  entire economy on a single 40-tile commute. */
+const GATHERER_MAX_DROPOFF_DIST = 25;
 
 // ── Composition tables ──────────────────────────────────────────────────────
 
@@ -337,6 +343,9 @@ export class MilitaryAI {
       if (e.kind !== "unit") continue;
       const u = e as UnitEntity;
       if (u.state.kind === "platformShell") continue;
+      // Skip concealed / in-cover enemies — AI doesn't panic over ghosts it can't see.
+      if (u.invisibilityActive || u.disguiseActive || u.concealed) continue;
+      if (u.state.kind === "hidingInBuilding" || u.state.kind === "inEnemyBuilding") continue;
       if (_distSq(u.position, homeCenter) < THREAT_RADIUS * THREAT_RADIUS) threats.push(u);
     }
 
@@ -515,13 +524,18 @@ export class MilitaryAI {
       }
     }
 
-    // Assign idle gatherers to gather the scarcer resource.
+    // Assign idle gatherers to the deposit with the shortest round-trip to its
+    // nearest drop-off building. Gatherers prefer the scarcer resource, but fall back
+    // to the other kind if no viable deposit exists in range.
     for (const surf of ctx.units) {
       if (surf.typeKey !== gatherer || surf.state.kind !== "idle") continue;
       const prefer: "wood" | "water" = ctx.resources.water >= ctx.resources.wood ? "wood" : "water";
+      const other: "wood" | "water" = prefer === "wood" ? "water" : "wood";
+      const preferDrops = _dropoffPositions(ctx.buildings, prefer);
+      const otherDrops = _dropoffPositions(ctx.buildings, other);
       const deposit =
-        _nearestDeposit(engine.deposits, surf.position, prefer) ??
-        _nearestDeposit(engine.deposits, surf.position, prefer === "wood" ? "water" : "wood");
+        _bestDepositForRoundTrip(engine.deposits, prefer, preferDrops, surf.position) ??
+        _bestDepositForRoundTrip(engine.deposits, other, otherDrops, surf.position);
       if (deposit) engine.issueGatherOrder(surf.id, deposit.id);
     }
   }
@@ -584,18 +598,19 @@ export class MilitaryAI {
       if (!hasCombatFactory) this._robotBuild(engine, ctx, roles.bootstrapFactory);
     }
 
-    // Send idle attached gatherers to nearest deposits.
+    // Send idle attached gatherers to the deposit with the best round-trip to a
+    // drop-off building (not just the one closest to the gatherer). Prevents the AI
+    // from committing gatherers to a 40-tile one-way commute when no storage is in
+    // range — `_maybeBuildWoodStorage` is what brings far deposits into play.
     for (const unit of ctx.units) {
       if (!gathererSet.has(unit.typeKey) || !unit.attachedCoreId) continue;
       if (unit.state.kind !== "idle") continue;
-      // Convention: first gatherer in `roles.gatherers` gathers water, second wood.
-      // If a faction has only one gatherer type, infer kind by the deposit that's
-      // nearest anyway (fall-through).
       const kind: "wood" | "water" =
         roles.gatherers.length >= 2 && unit.typeKey === roles.gatherers[0]
           ? "water"
           : "wood";
-      const deposit = _nearestDeposit(engine.deposits, unit.position, kind);
+      const dropoffs = _dropoffPositions(ctx.buildings, kind);
+      const deposit = _bestDepositForRoundTrip(engine.deposits, kind, dropoffs, unit.position);
       if (deposit) engine.issueGatherOrder(unit.id, deposit.id);
     }
   }
@@ -1076,6 +1091,72 @@ function _nearestDeposit(
   return best;
 }
 
+/** Positions of operational drop-off buildings eligible for the given resource kind. */
+function _dropoffPositions(buildings: BuildingEntity[], kind: "wood" | "water"): Vec2[] {
+  const eligible = resourceDropoffBuildings[kind];
+  const out: Vec2[] = [];
+  for (const b of buildings) {
+    if (!b.isOperational) continue;
+    if (!eligible.includes(b.typeKey)) continue;
+    out.push(b.position);
+  }
+  return out;
+}
+
+/**
+ * Pick the deposit with the shortest round-trip: `dist(deposit, nearest drop-off) +
+ * small weighting for dist(gatherer, deposit)`. Skips deposits whose nearest
+ * drop-off is farther than `GATHERER_MAX_DROPOFF_DIST` — the AI should build a
+ * wood-storage closer before working those.
+ *
+ * Fallback: if every deposit is over the distance cap (e.g. very early game with no
+ * drop-off yet), return the overall-nearest-to-drop-off deposit so the AI doesn't
+ * stall completely.
+ */
+function _bestDepositForRoundTrip(
+  deposits: ResourceDeposit[],
+  kind: "wood" | "water",
+  dropoffs: Vec2[],
+  gathererPos: Vec2,
+): ResourceDeposit | null {
+  if (dropoffs.length === 0) {
+    // No drop-off yet — fall back to the plain nearest deposit.
+    return _nearestDeposit(deposits, gathererPos, kind);
+  }
+  const cap = GATHERER_MAX_DROPOFF_DIST * GATHERER_MAX_DROPOFF_DIST;
+  let bestInCap: ResourceDeposit | null = null;
+  let bestInCapScore = Infinity;
+  let bestOverall: ResourceDeposit | null = null;
+  let bestOverallDropDist = Infinity;
+
+  for (const d of deposits) {
+    if (d.kind !== kind || d.quantity <= 0) continue;
+    let nearestDropDistSq = Infinity;
+    for (const drop of dropoffs) {
+      const dx = d.position.x - drop.x;
+      const dy = d.position.y - drop.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < nearestDropDistSq) nearestDropDistSq = distSq;
+    }
+    if (nearestDropDistSq < bestOverallDropDist) {
+      bestOverallDropDist = nearestDropDistSq;
+      bestOverall = d;
+    }
+    if (nearestDropDistSq > cap) continue;
+
+    // Score = drop-distance dominates (round-trip after settling), plus a 25%
+    // weight on gatherer-to-deposit so ties favour local picks.
+    const gdx = d.position.x - gathererPos.x;
+    const gdy = d.position.y - gathererPos.y;
+    const score = nearestDropDistSq + 0.25 * (gdx * gdx + gdy * gdy);
+    if (score < bestInCapScore) {
+      bestInCapScore = score;
+      bestInCap = d;
+    }
+  }
+  return bestInCap ?? bestOverall;
+}
+
 /**
  * Spiral outward from `near` looking for a build site. Prefer sites that are:
  *   1. Not adjacent to another friendly building (avoids chokepoint clusters).
@@ -1171,7 +1252,17 @@ function _issueAttackWave(
   const centroid: Vec2 = { x: cx, y: cy };
 
   const enemyUnits = (enemies.filter((e) => e.kind === "unit") as UnitEntity[])
-    .filter((e) => e.state.kind !== "platformShell");
+    .filter((e) =>
+      e.state.kind !== "platformShell" &&
+      // Concealed / in-cover enemies are off-limits: combat resolution would drop the
+      // attack anyway, but filtering here keeps the AI from committing a whole wave
+      // to a ghost it can't see.
+      !e.invisibilityActive &&
+      !e.disguiseActive &&
+      !e.concealed &&
+      e.state.kind !== "hidingInBuilding" &&
+      e.state.kind !== "inEnemyBuilding",
+    );
   const leaders = enemyUnits.filter((u) => LEADER_TYPES.has(u.typeKey));
   const nonLeaders = enemyUnits
     .filter((u) => !LEADER_TYPES.has(u.typeKey))

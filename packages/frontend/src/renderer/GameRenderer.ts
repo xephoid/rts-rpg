@@ -92,6 +92,9 @@ export class GameRenderer {
   private spriteKeyCache = new Map<string, string>();
   private selectionGfx: Graphics | null = null;
   private lastEntities: EntitySnapshot[] = [];
+  /** Per-viewer reveal set from the last tick — used by hit-tests to hide enemy
+   *  invisibility/disguise from selection + right-click target routing. */
+  private lastDetectedIds = new Set<string>();
   private lastFog: FogSnapshot | null = null;
   private selectedIds = new Set<string>();
   // Projectile + hit-flash effects
@@ -274,7 +277,8 @@ export class GameRenderer {
 
     this._processAttackEffects(state.attacks ?? []);
     this._processSpellEffects(state.spells ?? []);
-    this._renderEntities(state.entities, new Set(state.detectedIds[this.activeFaction] ?? []));
+    this.lastDetectedIds = new Set(state.detectedIds[this.activeFaction] ?? []);
+    this._renderEntities(state.entities, this.lastDetectedIds);
     this._updateTerritoryBoundary(state.entities);
     this._renderFog(this.lastFog);
     this._applyCamera();
@@ -371,6 +375,17 @@ export class GameRenderer {
         ? wizardBuildingStats[entity.typeKey]
         : robotBuildingStats[entity.typeKey];
     return stats?.footprintTiles ?? 2;
+  }
+
+  /** An enemy unit that is invisible and NOT in our detector-reveal set is unclickable
+   *  — prevents the viewer from right-click-targeting a unit they can't legitimately
+   *  see. Own-faction units are always clickable; enemy disguised units remain clickable
+   *  as their displayed identity (attack order will route to the real entity). */
+  private _isHitVisible(e: EntitySnapshot): boolean {
+    if (e.kind !== "unit") return true;
+    if (e.faction === this.activeFaction) return true;
+    if (e.invisible && !this.lastDetectedIds.has(e.id)) return false;
+    return true;
   }
 
   private _createEntitySprite(entity: EntitySnapshot): Sprite {
@@ -958,13 +973,13 @@ export class GameRenderer {
       if (kind === "fieryExplosion") {
         this.config.onSpellTargetGround?.(casterId, kind, { x: tileX, y: tileY });
       } else {
-        const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && this._hitTest(e, tileX, tileY)) ?? null;
+        const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && !e.hidden && !e.inEnemyBuilding && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
         if (hit) this.config.onSpellTargetUnit?.(casterId, kind, hit.id);
       }
       return;
     }
 
-    const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && this._hitTest(e, tileX, tileY)) ?? null;
+    const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && !e.hidden && !e.inEnemyBuilding && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
 
     if (hit) {
       const now = Date.now();
@@ -1016,7 +1031,7 @@ export class GameRenderer {
     // and the engine silently ignores orders the unit can't act on.
 
     const hitEntity = this.lastEntities.find(
-      (e) => !e.isShell && !e.garrisoned && !e.inPlatform && this._hitTest(e, tileX, tileY),
+      (e) => !e.isShell && !e.garrisoned && !e.inPlatform && !e.hidden && !e.inEnemyBuilding && this._isHitVisible(e) && this._hitTest(e, tileX, tileY),
     );
     if (hitEntity && this._fogValueAt(hitEntity.position.x, hitEntity.position.y) === 2) {
       // Builder right-clicking own under-construction building → resume construction

@@ -707,3 +707,92 @@ describe("Spy force-out", () => {
     expect(stray.stats.hp).toBe(hpBefore);
   });
 });
+
+// ── Combat targeting respects concealment ─────────────────────────────────────
+
+describe("Invisibility research → ability gating", () => {
+  it("toggle blocked until invisibility research completes; unlocks after completion is in snapshot", () => {
+    let lastSnapshot: { completedResearch: { wizards: string[] } } | null = null;
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      onTick: (s) => { lastSnapshot = s as unknown as typeof lastSnapshot; },
+    });
+    const il = spawnIllusionist(engine);
+    engine.getResources("wizards").mana = 200;
+
+    // Pre-research: toggle is a no-op.
+    engine.issueInvisibilityToggle(il.id);
+    expect(il.invisibilityActive).toBe(false);
+
+    // Grant "invisibility" research (the same key `illusionistInvisibilityResearchKey`).
+    engine.grantResearch("wizards", "invisibility");
+    engine.stepTick(0, 0);
+    expect(lastSnapshot!.completedResearch.wizards).toContain("invisibility");
+
+    // Post-research: toggle now flips the flag.
+    engine.issueInvisibilityToggle(il.id);
+    expect(il.invisibilityActive).toBe(true);
+  });
+});
+
+describe("Combat targeting filter", () => {
+  it("auto-aggro skips an invisible enemy not in detector set", () => {
+    const engine = makeEngine();
+    engine.grantResearch("wizards", "invisibility");
+    engine.getResources("wizards").mana = 200;
+
+    // Invisible Illusionist sits next to a Spitter Platform. Without detection the
+    // Spitter should NOT auto-aggro the Illusionist.
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const il = spawnIllusionist(engine, open);
+    engine.issueInvisibilityToggle(il.id);
+
+    const sStats = robotUnitStats.spitterPlatform!;
+    const spitter = new UnitEntity({
+      faction: "robots",
+      typeKey: "spitterPlatform",
+      position: { x: open.x + 2, y: open.y },
+      stats: {
+        maxHp: sStats.hpWood, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armorWood, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(spitter);
+
+    for (let t = 0; t < 30; t++) engine.stepTick(t, t * 16);
+    expect(spitter.state.kind).toBe("idle");
+    expect(il.stats.hp).toBe(il.stats.maxHp);
+  });
+
+  it("manually issued attack against invisible enemy drops to idle", () => {
+    const engine = makeEngine();
+    engine.grantResearch("wizards", "invisibility");
+    engine.getResources("wizards").mana = 200;
+
+    const open = findOpenTile(engine, { x: 10, y: 10 });
+    const il = spawnIllusionist(engine, open);
+    engine.issueInvisibilityToggle(il.id);
+
+    const sStats = robotUnitStats.spitterPlatform!;
+    const spitter = new UnitEntity({
+      faction: "robots",
+      typeKey: "spitterPlatform",
+      position: { x: open.x + 1, y: open.y },
+      stats: {
+        maxHp: sStats.hpWood, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armorWood, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(spitter);
+
+    engine.issueAttackOrder(spitter.id, il.id);
+    engine.stepTick(0, 0);
+    expect(spitter.state.kind).toBe("idle");
+    expect(il.stats.hp).toBe(il.stats.maxHp);
+  });
+});
