@@ -4,7 +4,8 @@
 export type StatBlockInit = {
   maxHp: number;
   damage: number;
-  range: number;
+  attackRange: number;
+  sightRange: number;
   speed: number;
   charisma: number;
   armor: number;
@@ -17,7 +18,7 @@ export type LevelUpBonus = {
   armorPct: number;
   speedPct: number;
   charismaPct: number;
-  rangePct: number;
+  attackRangePct: number;
   capacityPct: number;
 };
 
@@ -25,7 +26,8 @@ export class StatBlock {
   hp: number;
   maxHp: number;
   damage: number;
-  range: number;
+  attackRange: number;
+  sightRange: number;
   speed: number;
   charisma: number;
   armor: number;
@@ -37,7 +39,8 @@ export class StatBlock {
     this.hp = init.maxHp;
     this.maxHp = init.maxHp;
     this.damage = init.damage;
-    this.range = init.range;
+    this.attackRange = init.attackRange;
+    this.sightRange = init.sightRange;
     this.speed = init.speed;
     this.charisma = init.charisma;
     this.armor = init.armor;
@@ -83,7 +86,7 @@ export class StatBlock {
     if (bonus.armorPct > 0) this.armor = Math.round(this.armor * (1 + bonus.armorPct / 100));
     if (bonus.speedPct > 0) this.speed = Math.round(this.speed * (1 + bonus.speedPct / 100) * 10) / 10;
     if (bonus.charismaPct > 0) this.charisma = Math.round(this.charisma * (1 + bonus.charismaPct / 100));
-    if (bonus.rangePct > 0) this.range = Math.round(this.range * (1 + bonus.rangePct / 100) * 10) / 10;
+    if (bonus.attackRangePct > 0) this.attackRange = Math.round(this.attackRange * (1 + bonus.attackRangePct / 100) * 10) / 10;
     if (bonus.capacityPct > 0) this.capacity = Math.round(this.capacity * (1 + bonus.capacityPct / 100));
   }
 
@@ -91,7 +94,8 @@ export class StatBlock {
     hp: number;
     maxHp: number;
     damage: number;
-    range: number;
+    attackRange: number;
+    sightRange: number;
     speed: number;
     charisma: number;
     armor: number;
@@ -103,7 +107,8 @@ export class StatBlock {
       hp: this.hp,
       maxHp: this.maxHp,
       damage: this.damage,
-      range: this.range,
+      attackRange: this.attackRange,
+      sightRange: this.sightRange,
       speed: this.speed,
       charisma: this.charisma,
       armor: this.armor,

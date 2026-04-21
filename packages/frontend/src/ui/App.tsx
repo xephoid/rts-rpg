@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { GameEngine } from "../game/GameEngine.js";
-import { GameRenderer } from "../renderer/GameRenderer.js";
+import { GameRenderer, TILE_SIZE } from "../renderer/GameRenderer.js";
 import { useGameStore } from "../store/gameStore.js";
 import { useUIStore } from "../store/uiStore.js";
 import { AlertLog } from "./hud/AlertLog.js";
 import { BottomPanel } from "./hud/BottomPanel.js";
+import { FactionStatsPanel } from "./hud/FactionStatsPanel.js";
 import { ResourceBar } from "./hud/ResourceBar.js";
 import { StartScreen } from "./screens/StartScreen.js";
 import styles from "./App.module.css";
@@ -44,8 +45,22 @@ export function App() {
   const clearPendingAttach = useUIStore((s) => s.clearPendingAttach);
   const pendingDetach = useUIStore((s) => s.pendingDetach);
   const clearPendingDetach = useUIStore((s) => s.clearPendingDetach);
+  const pendingLeaveGarrison = useUIStore((s) => s.pendingLeaveGarrison);
+  const clearPendingLeaveGarrison = useUIStore((s) => s.clearPendingLeaveGarrison);
+  const pendingEjectOccupants = useUIStore((s) => s.pendingEjectOccupants);
+  const clearPendingEjectOccupants = useUIStore((s) => s.clearPendingEjectOccupants);
   const pendingManaShieldToggle = useUIStore((s) => s.pendingManaShieldToggle);
   const clearPendingManaShieldToggle = useUIStore((s) => s.clearPendingManaShieldToggle);
+  const pendingSpell = useUIStore((s) => s.pendingSpell);
+  const pendingIceBlast = useUIStore((s) => s.pendingIceBlast);
+  const clearPendingIceBlast = useUIStore((s) => s.clearPendingIceBlast);
+  const pendingFieryExplosion = useUIStore((s) => s.pendingFieryExplosion);
+  const clearPendingFieryExplosion = useUIStore((s) => s.clearPendingFieryExplosion);
+  const pendingEnlarge = useUIStore((s) => s.pendingEnlarge);
+  const clearPendingEnlarge = useUIStore((s) => s.clearPendingEnlarge);
+  const pendingReduce = useUIStore((s) => s.pendingReduce);
+  const clearPendingReduce = useUIStore((s) => s.clearPendingReduce);
+  const statsOpen = useUIStore((s) => s.statsOpen);
 
   // Init renderer + engine — only once faction has been chosen
   useEffect(() => {
@@ -73,6 +88,9 @@ export function App() {
       onAttackOrder: (unitIds, targetId) => {
         for (const id of unitIds) engineRef.current?.issueAttackOrder(id, targetId);
       },
+      onFollowOrder: (unitIds, targetId) => {
+        for (const id of unitIds) engineRef.current?.issueFollowOrder(id, targetId);
+      },
       onTalkOrder: (unitIds, targetId) => {
         for (const id of unitIds) engineRef.current?.issueTalkOrder(id, targetId);
       },
@@ -84,11 +102,26 @@ export function App() {
       onAttachOrder: (coreId, platformId) => {
         useUIStore.getState().issueAttach(coreId, platformId);
       },
+      onGarrisonOrder: (unitId, towerId) => {
+        engineRef.current?.issueGarrisonOrder(unitId, towerId);
+      },
+      onEnterPlatformOrder: (coreId, platformId) => {
+        engineRef.current?.issueEnterPlatformOrder(coreId, platformId);
+      },
       onBuildOrder: (tileX, tileY) => {
         const bm = useUIStore.getState().buildMode;
         if (!bm) return;
         useUIStore.getState().issueBuildOrder(bm.unitId, bm.buildingTypeKey, { x: tileX, y: tileY });
         useUIStore.getState().setBuildMode(null);
+      },
+      onSpellTargetUnit: (casterId, spellKind, targetId) => {
+        const store = useUIStore.getState();
+        if (spellKind === "iceBlast") store.issueIceBlast(casterId, targetId);
+        else if (spellKind === "enlarge") store.issueEnlarge(casterId, targetId);
+        else if (spellKind === "reduce") store.issueReduce(casterId, targetId);
+      },
+      onSpellTargetGround: (casterId, spellKind, tilePos) => {
+        if (spellKind === "fieryExplosion") useUIStore.getState().issueFieryExplosion(casterId, tilePos);
       },
       onMoveOrder: (entityIds, target) => {
         const { pendingPatrolIds, setPendingPatrolIds } = useUIStore.getState();
@@ -102,7 +135,7 @@ export function App() {
           }
           setPendingPatrolIds(null);
         } else {
-          for (const id of entityIds) engineRef.current?.issueMoveOrder(id, target);
+          engineRef.current?.issueGroupMoveOrder(entityIds, target);
         }
       },
     });
@@ -115,6 +148,7 @@ export function App() {
     const engine = new GameEngine({
       mapSize: mapSizeRef.current,
       seed: Math.floor(Math.random() * 2 ** 32),
+      playerFaction: useUIStore.getState().activeFaction,
       onTick: (state) => {
         pushGameState(state);
         renderer.render(state);
@@ -129,6 +163,18 @@ export function App() {
         return;
       }
       engine.start();
+      // Center camera on the active faction's starting building
+      const faction = useUIStore.getState().activeFaction;
+      const homeTypeKey = faction === "wizards" ? "castle" : "home";
+      const homeBuilding = engine.entities.buildingsByFaction(faction)
+        .find((b) => b.typeKey === homeTypeKey);
+      if (homeBuilding) {
+        const screenW = container.clientWidth;
+        const screenH = container.clientHeight;
+        const worldX = homeBuilding.position.x * TILE_SIZE;
+        const worldY = homeBuilding.position.y * TILE_SIZE;
+        renderer.setCameraPosition(worldX - screenW / 2, worldY - screenH / 2);
+      }
     });
 
     return () => {
@@ -249,12 +295,56 @@ export function App() {
     clearPendingDetach();
   }, [pendingDetach, clearPendingDetach]);
 
+  // Consume pending leave garrison orders
+  useEffect(() => {
+    if (!pendingLeaveGarrison) return;
+    engineRef.current?.issueLeaveGarrisonOrder(pendingLeaveGarrison);
+    clearPendingLeaveGarrison();
+  }, [pendingLeaveGarrison, clearPendingLeaveGarrison]);
+
+  // Consume pending eject-occupants orders (building-side eject)
+  useEffect(() => {
+    if (!pendingEjectOccupants) return;
+    engineRef.current?.issueEjectOccupantsOrder(pendingEjectOccupants);
+    clearPendingEjectOccupants();
+  }, [pendingEjectOccupants, clearPendingEjectOccupants]);
+
   // Consume pending mana shield toggle orders
   useEffect(() => {
     if (!pendingManaShieldToggle) return;
     engineRef.current?.issueManaShieldToggle(pendingManaShieldToggle);
     clearPendingManaShieldToggle();
   }, [pendingManaShieldToggle, clearPendingManaShieldToggle]);
+
+  // Sync spell targeting mode to renderer
+  useEffect(() => {
+    rendererRef.current?.setSpellMode(pendingSpell);
+  }, [pendingSpell]);
+
+  // Consume pending spell orders
+  useEffect(() => {
+    if (!pendingIceBlast) return;
+    engineRef.current?.issueIceBlastOrder(pendingIceBlast.casterId, pendingIceBlast.targetId);
+    clearPendingIceBlast();
+  }, [pendingIceBlast, clearPendingIceBlast]);
+
+  useEffect(() => {
+    if (!pendingFieryExplosion) return;
+    engineRef.current?.issueFieryExplosionOrder(pendingFieryExplosion.casterId, pendingFieryExplosion.targetPos);
+    clearPendingFieryExplosion();
+  }, [pendingFieryExplosion, clearPendingFieryExplosion]);
+
+  useEffect(() => {
+    if (!pendingEnlarge) return;
+    engineRef.current?.issueEnlargeOrder(pendingEnlarge.casterId, pendingEnlarge.targetId);
+    clearPendingEnlarge();
+  }, [pendingEnlarge, clearPendingEnlarge]);
+
+  useEffect(() => {
+    if (!pendingReduce) return;
+    engineRef.current?.issueReduceOrder(pendingReduce.casterId, pendingReduce.targetId);
+    clearPendingReduce();
+  }, [pendingReduce, clearPendingReduce]);
 
   // WASD panning
   useEffect(() => {
@@ -316,6 +406,7 @@ export function App() {
       <div className={styles.canvasContainer} ref={canvasRef} />
       <div className={styles.hud}>
         <ResourceBar />
+        {statsOpen && <FactionStatsPanel />}
         <AlertLog />
         <BottomPanel />
       </div>

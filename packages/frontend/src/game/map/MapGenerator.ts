@@ -8,6 +8,7 @@ import { woodDeposit, waterDeposit, mapSizes } from "@neither/shared";
 // Every forest tile is a wood resource; every water tile is a water resource.
 // Quantities are fixed per tile — see resourceCosts.ts for values.
 import type { Grid } from "../spatial/Grid.js";
+import { findPath } from "../spatial/Pathfinder.js";
 
 export type MapSize = "small" | "medium" | "large";
 
@@ -126,7 +127,95 @@ export function generateMap(grid: Grid, options: MapGeneratorOptions): Omit<Gene
   // ── Starting position pass ──────────────────────────────────────────────────
   const startingPositions = placeStartingPositions(grid, W, H, factionCount, rng);
 
+  // ── Clear resources near starting positions ──────────────────────────────────
+  // Castle/home footprint is 4×4; sp is top-left corner — center at sp+1.5
+  const STARTING_CLEAR_RADIUS = 6;
+  for (const sp of startingPositions) {
+    const cx = sp.x + 1.5;
+    const cy = sp.y + 1.5;
+    for (let dy = -STARTING_CLEAR_RADIUS; dy <= STARTING_CLEAR_RADIUS; dy++) {
+      for (let dx = -STARTING_CLEAR_RADIUS; dx <= STARTING_CLEAR_RADIUS; dx++) {
+        const fdx = (sp.x + dx + 0.5) - cx;
+        const fdy = (sp.y + dy + 0.5) - cy;
+        if (fdx * fdx + fdy * fdy > STARTING_CLEAR_RADIUS * STARTING_CLEAR_RADIUS) continue;
+        const tx = sp.x + dx;
+        const ty = sp.y + dy;
+        if (!grid.inBounds(tx, ty)) continue;
+        const tile = grid.getTile(tx, ty);
+        if (tile?.terrain === "forest" || tile?.terrain === "water") grid.setTerrain(tx, ty, "open");
+        const idx = deposits.findIndex((d) => d.position.x === tx && d.position.y === ty);
+        if (idx !== -1) deposits.splice(idx, 1);
+      }
+    }
+  }
+
+  // ── Guarantee ground connectivity between bases ─────────────────────────────
+  ensureGroundConnectivity(grid, startingPositions, deposits);
+
   return { deposits, startingPositions };
+}
+
+/**
+ * Make sure every pair of starting positions has a walkable ground route between
+ * them. If a pair is separated by water or mountain (both impassable), carve the
+ * shortest crossing from one base to the other: run A* with all in-bounds tiles
+ * treated as passable, then convert any water tile the returned path crosses to
+ * open terrain (+ one perpendicular neighbour to widen the channel past 1 tile so
+ * units don't deadlock in a single-file corridor).
+ *
+ * Only runs during map generation, so A* cost is negligible.
+ */
+function ensureGroundConnectivity(
+  grid: Grid,
+  startingPositions: Vec2[],
+  deposits: ResourceDeposit[],
+): void {
+  if (startingPositions.length < 2) return;
+
+  // Base footprint is 4×4; use its centre as each endpoint.
+  const centreOf = (sp: Vec2): Vec2 => ({
+    x: Math.round(sp.x + 1.5),
+    y: Math.round(sp.y + 1.5),
+  });
+
+  for (let i = 1; i < startingPositions.length; i++) {
+    const start = centreOf(startingPositions[0]!);
+    const goal = centreOf(startingPositions[i]!);
+
+    // Already connected by passable ground? Done.
+    if (findPath(grid, start, goal) !== null) continue;
+
+    // Find shortest route allowing any in-bounds tile. `isPassable` override
+    // forces uniform cost, so A* minimises total tile count — which tends to
+    // minimise the stretch of water we have to carve.
+    const carvePath = findPath(grid, start, goal, {
+      isPassable: (x, y) => grid.inBounds(x, y),
+    });
+    if (!carvePath) continue; // impossible (out-of-bounds endpoints); let it be
+
+    for (const tile of carvePath) {
+      carveTile(grid, deposits, tile.x, tile.y);
+      // Widen to 2 tiles by opening one non-water-adjacent neighbour on each side.
+      carveTile(grid, deposits, tile.x + 1, tile.y);
+      carveTile(grid, deposits, tile.x, tile.y + 1);
+    }
+  }
+}
+
+/** Convert a water tile at (x, y) into open terrain and drop the water deposit
+ *  that was there. No-op if the tile wasn't water. */
+function carveTile(
+  grid: Grid,
+  deposits: ResourceDeposit[],
+  x: number,
+  y: number,
+): void {
+  if (!grid.inBounds(x, y)) return;
+  const tile = grid.getTile(x, y);
+  if (!tile || tile.terrain !== "water") return;
+  grid.setTerrain(x, y, "open");
+  const idx = deposits.findIndex((d) => d.position.x === x && d.position.y === y);
+  if (idx !== -1) deposits.splice(idx, 1);
 }
 
 /**

@@ -99,10 +99,44 @@ export type UIStore = {
   issueDetach: (platformId: string) => void;
   clearPendingDetach: () => void;
 
+  /** Leave garrison order: garrisoned wizard unit exits Wizard Tower. */
+  pendingLeaveGarrison: string | null;
+  issueLeaveGarrison: (unitId: string) => void;
+  clearPendingLeaveGarrison: () => void;
+
+  /** Eject-occupants order: a building ejects all garrisoned units / Cores. Used for
+   *  wizardTower (1 occupant) and immobileCombatPlatform (up to 3 occupants). */
+  pendingEjectOccupants: string | null;
+  issueEjectOccupants: (buildingId: string) => void;
+  clearPendingEjectOccupants: () => void;
+
   /** Mana Shield toggle order for a wizard unit. */
   pendingManaShieldToggle: string | null;
   issueManaShieldToggle: (unitId: string) => void;
   clearPendingManaShieldToggle: () => void;
+
+  /** Active spell targeting mode — set when a spell button is clicked. Cleared on cast or Escape. */
+  pendingSpell: { kind: "iceBlast" | "fieryExplosion" | "enlarge" | "reduce"; casterId: string } | null;
+  setPendingSpell: (spell: UIStore["pendingSpell"]) => void;
+
+  pendingIceBlast: { casterId: string; targetId: string } | null;
+  issueIceBlast: (casterId: string, targetId: string) => void;
+  clearPendingIceBlast: () => void;
+
+  pendingFieryExplosion: { casterId: string; targetPos: { x: number; y: number } } | null;
+  issueFieryExplosion: (casterId: string, targetPos: { x: number; y: number }) => void;
+  clearPendingFieryExplosion: () => void;
+
+  pendingEnlarge: { casterId: string; targetId: string } | null;
+  issueEnlarge: (casterId: string, targetId: string) => void;
+  clearPendingEnlarge: () => void;
+
+  pendingReduce: { casterId: string; targetId: string } | null;
+  issueReduce: (casterId: string, targetId: string) => void;
+  clearPendingReduce: () => void;
+
+  statsOpen: boolean;
+  setStatsOpen: (open: boolean) => void;
 };
 
 export const useUIStore = create<UIStore>((set) => ({
@@ -110,7 +144,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setActiveFaction: (faction) => set({ activeFaction: faction }),
 
   selection: { mode: "none" },
-  setSelection: (s) => set({ selection: s, buildMenuOpen: false }),
+  setSelection: (s) => set({ selection: s, buildMenuOpen: false, pendingSpell: null }),
 
   activePanel: "none",
   setActivePanel: (panel) => set({ activePanel: panel }),
@@ -179,7 +213,37 @@ export const useUIStore = create<UIStore>((set) => ({
   issueDetach: (platformId) => set({ pendingDetach: { platformId } }),
   clearPendingDetach: () => set({ pendingDetach: null }),
 
+  pendingLeaveGarrison: null,
+  issueLeaveGarrison: (unitId) => set({ pendingLeaveGarrison: unitId }),
+  clearPendingLeaveGarrison: () => set({ pendingLeaveGarrison: null }),
+
+  pendingEjectOccupants: null,
+  issueEjectOccupants: (buildingId) => set({ pendingEjectOccupants: buildingId }),
+  clearPendingEjectOccupants: () => set({ pendingEjectOccupants: null }),
+
   pendingManaShieldToggle: null,
   issueManaShieldToggle: (unitId) => set({ pendingManaShieldToggle: unitId }),
   clearPendingManaShieldToggle: () => set({ pendingManaShieldToggle: null }),
+
+  pendingSpell: null,
+  setPendingSpell: (spell) => set({ pendingSpell: spell }),
+
+  pendingIceBlast: null,
+  issueIceBlast: (casterId, targetId) => set({ pendingIceBlast: { casterId, targetId }, pendingSpell: null }),
+  clearPendingIceBlast: () => set({ pendingIceBlast: null }),
+
+  pendingFieryExplosion: null,
+  issueFieryExplosion: (casterId, targetPos) => set({ pendingFieryExplosion: { casterId, targetPos }, pendingSpell: null }),
+  clearPendingFieryExplosion: () => set({ pendingFieryExplosion: null }),
+
+  pendingEnlarge: null,
+  issueEnlarge: (casterId, targetId) => set({ pendingEnlarge: { casterId, targetId }, pendingSpell: null }),
+  clearPendingEnlarge: () => set({ pendingEnlarge: null }),
+
+  pendingReduce: null,
+  issueReduce: (casterId, targetId) => set({ pendingReduce: { casterId, targetId }, pendingSpell: null }),
+  clearPendingReduce: () => set({ pendingReduce: null }),
+
+  statsOpen: false,
+  setStatsOpen: (open) => set({ statsOpen: open }),
 }));

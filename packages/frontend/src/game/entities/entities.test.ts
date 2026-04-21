@@ -8,7 +8,8 @@ import { StatBlock } from "./StatBlock.js";
 const baseStats = {
   maxHp: 100,
   damage: 20,
-  range: 5,
+  attackRange: 5,
+  sightRange: 8,
   speed: 2,
   charisma: 3,
   armor: 5,

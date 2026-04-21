@@ -105,6 +105,9 @@ export function UnitStatsPanel() {
             <div className={styles.entityMeta}>
               {entity.isNamed ? formatTypeKey(entity.typeKey) + " · " : ""}{entity.faction} · {entity.kind} · Lv {stats.level}
             </div>
+            {entity.kind === "unit" && entity.unitAction && (
+              <div className={styles.entityAction}>{entity.unitAction}</div>
+            )}
           </div>
         </div>
 
@@ -129,7 +132,7 @@ export function UnitStatsPanel() {
             <span className={styles.statKey}>Dmg</span>
           </div>
           <div className={styles.statCell}>
-            <span className={styles.statVal}>{stats.range}</span>
+            <span className={styles.statVal}>{stats.attackRange}</span>
             <span className={styles.statKey}>Range</span>
           </div>
           <div className={styles.statCell}>
@@ -218,6 +221,25 @@ export function UnitStatsPanel() {
               </div>
             </div>
           </div>
+        )}
+
+        {entity.kind === "building" && entity.typeKey === "immobileCombatPlatform" && entity.buildingState !== "underConstruction" && (
+          <div className={styles.buildingIdle}>
+            Occupants: {entity.occupantCount ?? 0} / 3
+            {(entity.occupantCount ?? 0) > 0 && ` — ${entity.occupantCount} Core${(entity.occupantCount ?? 0) > 1 ? "s" : ""}`}
+          </div>
+        )}
+
+        {entity.kind === "building" && entity.typeKey === "wizardTower" && entity.buildingState !== "underConstruction" && (
+          (() => {
+            const garId = entity.garrisonedUnitId;
+            const occ = garId ? gameState.entities.find((e) => e.id === garId) : null;
+            return (
+              <div className={styles.buildingIdle}>
+                {occ ? `Occupied by ${formatTypeKey(occ.typeKey)}` : "Empty"}
+              </div>
+            );
+          })()
         )}
 
         {entity.kind === "building" && entity.buildingState !== "underConstruction" && entity.buildingState !== "researching" && (

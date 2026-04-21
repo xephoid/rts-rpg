@@ -62,8 +62,26 @@ export function MinimapPanel() {
       );
     }
 
+    // Territory wash — semi-transparent color over building footprint tiles
+    for (const entity of gameState.entities) {
+      if (entity.kind !== "building" || entity.buildingState === "underConstruction") continue;
+      const visibility = fog.data[Math.floor(entity.position.y) * fog.width + Math.floor(entity.position.x)] ?? 0;
+      if (visibility === 0) continue;
+      ctx.fillStyle = entity.faction === "wizards"
+        ? "rgba(168, 85, 247, 0.25)"
+        : "rgba(234, 179, 8, 0.25)";
+      ctx.fillRect(
+        Math.floor(entity.position.x * scale),
+        Math.floor(entity.position.y * scale),
+        Math.max(2, Math.ceil(2 * scale)),
+        Math.max(2, Math.ceil(2 * scale)),
+      );
+    }
+
     // Entity dots (only VISIBLE)
     for (const entity of gameState.entities) {
+      // Occupants tucked inside carriers/buildings shouldn't show as separate dots.
+      if (entity.kind === "unit" && (entity.isShell || entity.garrisoned || entity.inPlatform)) continue;
       const tileX = Math.floor(entity.position.x);
       const tileY = Math.floor(entity.position.y);
       const visibility = fog.data[tileY * fog.width + tileX] ?? 0;

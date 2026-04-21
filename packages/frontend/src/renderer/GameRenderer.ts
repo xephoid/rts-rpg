@@ -2,7 +2,7 @@
 // No UI elements drawn here. No React imports.
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
-import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot } from "@neither/shared";
+import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot, AttackEvent, SpellEvent } from "@neither/shared";
 import { robotBuildingStats, wizardBuildingStats, buildingRequiresAdjacentWater } from "@neither/shared";
 import {
   terrainAssets,
@@ -40,12 +40,21 @@ export type RendererConfig = {
    * TODO(phase-diplomacy): filter to units with talk capability before calling.
    */
   onTalkOrder?: (unitIds: string[], targetId: string) => void;
+  onFollowOrder?: (unitIds: string[], targetId: string) => void;
   /** Called when user confirms a build placement (left-click in build mode). */
   onBuildOrder?: (tileX: number, tileY: number) => void;
   /** Called when a builder right-clicks a friendly under-construction building. */
   onResumeConstructionOrder?: (unitIds: string[], buildingId: string) => void;
   /** Called when an unattached Core right-clicks a friendly idle platform. */
   onAttachOrder?: (coreId: string, platformId: string) => void;
+  /** Called when an evoker/archmage right-clicks a friendly unoccupied Wizard Tower. */
+  onGarrisonOrder?: (unitId: string, towerId: string) => void;
+  /** Called when a free Core right-clicks a friendly Immobile Combat Platform below capacity. */
+  onEnterPlatformOrder?: (coreId: string, platformId: string) => void;
+  /** Called when user clicks a unit while a unit-targeted spell is pending. */
+  onSpellTargetUnit?: (casterId: string, spellKind: string, targetId: string) => void;
+  /** Called when user clicks a ground tile while a ground-targeted spell is pending. */
+  onSpellTargetGround?: (casterId: string, spellKind: string, tilePos: { x: number; y: number }) => void;
 };
 
 export class GameRenderer {
@@ -77,7 +86,32 @@ export class GameRenderer {
   private lastEntities: EntitySnapshot[] = [];
   private lastFog: FogSnapshot | null = null;
   private selectedIds = new Set<string>();
-  private shieldTintedIds = new Set<string>();
+  // Projectile + hit-flash effects
+  private projectileContainer: Container | null = null;
+  private liveProjectiles: Array<{
+    gfx: Graphics;
+    fromX: number; fromY: number;
+    toX: number; toY: number;
+    startTick: number;
+    durationTicks: number;
+    targetId: string;
+  }> = [];
+  private liveAreaEffects: Array<{
+    gfx: Graphics;
+    x: number; y: number;
+    startTick: number;
+    durationTicks: number;
+    maxRadius: number;
+    color: number;
+  }> = [];
+  /** endTick + color for temporary flash overrides (hit-flash, spell cast confirm). */
+  private flashEndTick = new Map<string, { endTick: number; color: number }>();
+  private renderTick = 0;
+
+  // Territory boundary
+  private territoryGfx: Graphics | null = null;
+  private _territoryCacheKey = "";
+  private _territorySegments = new Map<Faction, Array<{ x1: number; y1: number; x2: number; y2: number }>>();
 
   // Left-click / rubber band state
   private leftDownPos: { x: number; y: number } | null = null;
@@ -104,6 +138,9 @@ export class GameRenderer {
   // Build mode ghost state
   private ghostContainer: Container | null = null;
   private buildMode: { typeKey: string; footprintTiles: number; faction: "wizards" | "robots" } | null = null;
+
+  // Spell targeting mode
+  private spellMode: { kind: string; casterId: string } | null = null;
   private ghostTileX = 0;
   private ghostTileY = 0;
   private lastTiles = new Map<string, TileSnapshot>();
@@ -133,8 +170,16 @@ export class GameRenderer {
     this.tileContainer = new Container();
     this.worldContainer.addChild(this.tileContainer);
 
+    this.territoryGfx = new Graphics();
+    this.territoryGfx.zIndex = 1;
+    this.worldContainer.addChild(this.territoryGfx);
+
     this.entityContainer = new Container();
+    this.entityContainer.sortableChildren = true;
     this.worldContainer.addChild(this.entityContainer);
+
+    this.projectileContainer = new Container();
+    this.worldContainer.addChild(this.projectileContainer);
 
     // Ghost placement overlay — in world space, above entities
     this.ghostContainer = new Container();
@@ -218,9 +263,14 @@ export class GameRenderer {
     for (const d of state.deposits ?? []) {
       this.lastDeposits.set(`${d.position.x},${d.position.y}`, d);
     }
+
+    this._processAttackEffects(state.attacks ?? []);
+    this._processSpellEffects(state.spells ?? []);
     this._renderEntities(state.entities);
+    this._updateTerritoryBoundary(state.entities);
     this._renderFog(this.lastFog);
     this._applyCamera();
+    this.renderTick++;
   }
 
   setActiveFaction(faction: Faction): void {
@@ -229,6 +279,81 @@ export class GameRenderer {
 
   setSelectedIds(ids: string[]): void {
     this.selectedIds = new Set(ids);
+  }
+
+  private _updateTerritoryBoundary(entities: EntitySnapshot[]): void {
+    if (!this.territoryGfx) return;
+
+    const buildings = entities.filter((e) => e.kind === "building" && e.buildingState !== "underConstruction");
+    const cacheKey = buildings.map((b) => b.id).sort().join(",");
+    if (cacheKey !== this._territoryCacheKey) {
+      this._territoryCacheKey = cacheKey;
+      this._territorySegments.clear();
+
+      for (const faction of ["wizards", "robots"] as const) {
+        const factionBuildings = buildings.filter((b) => b.faction === faction);
+        const territory = new Set<string>();
+
+        for (const b of factionBuildings) {
+          const fp = this._getFootprint(b);
+          for (let dy = 0; dy < fp; dy++) {
+            for (let dx = 0; dx < fp; dx++) {
+              const tx = b.position.x + dx;
+              const ty = b.position.y + dy;
+              // Expand 1 tile in all 8 directions
+              for (let ey = -1; ey <= 1; ey++) {
+                for (let ex = -1; ex <= 1; ex++) {
+                  territory.add(`${tx + ex},${ty + ey}`);
+                }
+              }
+            }
+          }
+        }
+
+        const segments: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+        const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]] as const;
+        // edge offsets for each direction: top, right, bottom, left
+        const EDGES = [
+          { x1: 0, y1: 0, x2: 1, y2: 0 },
+          { x1: 1, y1: 0, x2: 1, y2: 1 },
+          { x1: 0, y1: 1, x2: 1, y2: 1 },
+          { x1: 0, y1: 0, x2: 0, y2: 1 },
+        ] as const;
+
+        for (const key of territory) {
+          const [tx, ty] = key.split(",").map(Number) as [number, number];
+          for (let i = 0; i < 4; i++) {
+            const [nx, ny] = [tx + DIRS[i]![0], ty + DIRS[i]![1]];
+            if (!territory.has(`${nx},${ny}`)) {
+              const e = EDGES[i]!;
+              segments.push({ x1: tx + e.x1, y1: ty + e.y1, x2: tx + e.x2, y2: ty + e.y2 });
+            }
+          }
+        }
+        this._territorySegments.set(faction, segments);
+      }
+    }
+
+    // Redraw from cached segments every tick
+    this.territoryGfx.clear();
+    const fog = this.lastFog;
+    for (const [faction, segments] of this._territorySegments) {
+      const color = faction === "wizards" ? 0xa855f7 : 0xeab308;
+      const isOwn = faction === this.activeFaction;
+      for (const seg of segments) {
+        // Opposing territory only visible where explored
+        if (!isOwn && fog) {
+          const midX = Math.floor((seg.x1 + seg.x2) / 2);
+          const midY = Math.floor((seg.y1 + seg.y2) / 2);
+          const idx = midY * (fog.width ?? this.mapWidthTiles) + midX;
+          if (!fog.data[idx]) continue;
+        }
+        this.territoryGfx
+          .moveTo(seg.x1 * TILE_SIZE, seg.y1 * TILE_SIZE)
+          .lineTo(seg.x2 * TILE_SIZE, seg.y2 * TILE_SIZE)
+          .stroke({ color, width: 2, alpha: 0.75 });
+      }
+    }
   }
 
   private _getFootprint(entity: EntitySnapshot): number {
@@ -255,28 +380,134 @@ export class GameRenderer {
     return sprite;
   }
 
+  private _entityCenter(entityId: string, fallbackPos: { x: number; y: number }): { x: number; y: number } {
+    const entity = this.lastEntities.find((e) => e.id === entityId);
+    const fp = entity ? this._getFootprint(entity) : 1;
+    const pos = entity ? entity.position : fallbackPos;
+    return { x: (pos.x + fp / 2) * TILE_SIZE, y: (pos.y + fp / 2) * TILE_SIZE };
+  }
+
+  private _processAttackEffects(attacks: AttackEvent[]): void {
+    if (!this.projectileContainer) return;
+
+    // Spawn new effects for this tick's attacks
+    for (const atk of attacks) {
+      if (!atk.ranged) {
+        this.flashEndTick.set(atk.targetId, { endTick: this.renderTick + 4, color: 0xff4444 });
+      } else {
+        const from = this._entityCenter(atk.attackerId, atk.attackerPos);
+        const to = this._entityCenter(atk.targetId, atk.targetPos);
+        const gfx = new Graphics();
+        gfx.circle(0, 0, 5).fill({ color: 0xffffff });
+        this.projectileContainer.addChild(gfx);
+        this.liveProjectiles.push({
+          gfx,
+          fromX: from.x,
+          fromY: from.y,
+          toX: to.x,
+          toY: to.y,
+          startTick: this.renderTick,
+          durationTicks: 18,
+          targetId: atk.targetId,
+        });
+      }
+    }
+
+    // Advance live projectiles
+    this.liveProjectiles = this.liveProjectiles.filter((p) => {
+      const elapsed = this.renderTick - p.startTick;
+      const t = Math.min(elapsed / p.durationTicks, 1);
+      p.gfx.x = p.fromX + (p.toX - p.fromX) * t;
+      p.gfx.y = p.fromY + (p.toY - p.fromY) * t;
+      if (t >= 1) {
+        this.flashEndTick.set(p.targetId, { endTick: this.renderTick + 4, color: 0xff4444 });
+        p.gfx.destroy();
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private _processSpellEffects(spells: SpellEvent[]): void {
+    if (!this.projectileContainer) return;
+
+    for (const spell of spells) {
+      if (spell.kind === "iceBlast") {
+        // Cyan travelling projectile
+        const from = this._entityCenter(spell.casterId, spell.casterPos);
+        const to = this._entityCenter(spell.targetId ?? "", spell.targetPos);
+        const gfx = new Graphics();
+        gfx.circle(0, 0, 6).fill({ color: 0x60a5fa });
+        this.projectileContainer.addChild(gfx);
+        this.liveProjectiles.push({ gfx, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, startTick: this.renderTick, durationTicks: 20, targetId: spell.targetId ?? "" });
+        // Override arrival flash to blue for ice hit
+        // (handled below when projectile lands)
+      } else if (spell.kind === "fieryExplosion") {
+        // Orange expanding ring at target tile
+        const cx = (spell.targetPos.x + 0.5) * TILE_SIZE;
+        const cy = (spell.targetPos.y + 0.5) * TILE_SIZE;
+        const gfx = new Graphics();
+        this.projectileContainer.addChild(gfx);
+        this.liveAreaEffects.push({ gfx, x: cx, y: cy, startTick: this.renderTick, durationTicks: 20, maxRadius: TILE_SIZE * 2.5, color: 0xf97316 });
+      } else if (spell.kind === "enlarge") {
+        // Brief gold flash on target
+        if (spell.targetId) this.flashEndTick.set(spell.targetId, { endTick: this.renderTick + 6, color: 0xfbbf24 });
+      } else if (spell.kind === "reduce") {
+        // Brief grey flash on target
+        if (spell.targetId) this.flashEndTick.set(spell.targetId, { endTick: this.renderTick + 6, color: 0x9ca3af });
+      }
+    }
+
+    // Advance area effects (expanding + fading ring)
+    this.liveAreaEffects = this.liveAreaEffects.filter((ae) => {
+      const elapsed = this.renderTick - ae.startTick;
+      const t = Math.min(elapsed / ae.durationTicks, 1);
+      const radius = ae.maxRadius * t;
+      const alpha = 1 - t;
+      ae.gfx.clear();
+      ae.gfx.x = ae.x;
+      ae.gfx.y = ae.y;
+      ae.gfx.circle(0, 0, radius).stroke({ color: ae.color, width: 3, alpha });
+      if (t >= 1) { ae.gfx.destroy(); return false; }
+      return true;
+    });
+  }
+
+  /** Persistent tint for a unit based on active status effects. Priority: slowed > enlarged > reduced > mana shield > none. */
+  private _baseTint(entity: EntitySnapshot): number {
+    if (entity.kind !== "unit") return 0xffffff;
+    if (entity.slowed) return 0x60a5fa;       // ice blue
+    if (entity.enlarged) return 0xfbbf24;     // gold
+    if (entity.reduced) return 0x9ca3af;      // grey
+    if (entity.manaShielded) return 0xa78bfa; // purple
+    return 0xffffff;
+  }
+
   private _renderEntities(entities: EntitySnapshot[]): void {
     if (!this.entityContainer) return;
 
     if (!this.selectionGfx) {
       this.selectionGfx = new Graphics();
+      this.selectionGfx.zIndex = 10;
       this.entityContainer.addChild(this.selectionGfx);
     }
 
     // Add / update entity sprites
     const currentIds = new Set<string>();
     for (const entity of entities) {
-      // Core units hide inside their platform while attached
-      if (entity.kind === "unit" && entity.isShell) continue;
+      // Hide units that are tucked inside a carrier:
+      //  - isShell   → Core attached to a mobile platform (robot combined unit)
+      //  - garrisoned → unit inside a Wizard Tower
+      //  - inPlatform → Core inside an Immobile Combat Platform
+      if (entity.kind === "unit" && (entity.isShell || entity.garrisoned || entity.inPlatform)) continue;
       currentIds.add(entity.id);
       const fp = this._getFootprint(entity);
 
       let sprite = this.entitySprites.get(entity.id);
       if (!sprite) {
         sprite = this._createEntitySprite(entity);
-        // Insert before selection gfx so the ring renders on top
-        const ringIdx = this.entityContainer.children.indexOf(this.selectionGfx);
-        this.entityContainer.addChildAt(sprite, ringIdx);
+        sprite.zIndex = entity.flying ? 2 : 0;
+        this.entityContainer.addChild(sprite);
         this.entitySprites.set(entity.id, sprite);
       }
 
@@ -285,12 +516,13 @@ export class GameRenderer {
       sprite.width = fp * TILE_SIZE;
       sprite.height = fp * TILE_SIZE;
 
-      if (entity.kind === "unit" && entity.manaShielded) {
-        sprite.tint = 0xa78bfa;
-        this.shieldTintedIds.add(entity.id);
-      } else if (this.shieldTintedIds.has(entity.id)) {
-        sprite.tint = 0xffffff;
-        this.shieldTintedIds.delete(entity.id);
+      const baseTint = this._baseTint(entity);
+      const flash = this.flashEndTick.get(entity.id);
+      if (flash !== undefined && this.renderTick <= flash.endTick) {
+        sprite.tint = flash.color;
+      } else {
+        if (flash !== undefined) this.flashEndTick.delete(entity.id);
+        sprite.tint = baseTint;
       }
 
       const fogVal = this._fogValueAt(entity.position.x, entity.position.y);
@@ -302,17 +534,34 @@ export class GameRenderer {
       if (!currentIds.has(id)) {
         sprite.destroy();
         this.entitySprites.delete(id);
-        this.shieldTintedIds.delete(id);
       }
     }
 
-    // Redraw selection rings for all selected entities
+    // Redraw selection rings and Core-attached indicators
     this.selectionGfx.clear();
     for (const entity of entities) {
+      const fogVal = this._fogValueAt(entity.position.x, entity.position.y);
+      const visible = fogVal === 2 || (fogVal === 1 && entity.kind === "building");
       if (this.selectedIds.has(entity.id)) {
         this._drawSelectionRing(entity);
       }
+      if (visible && entity.kind === "unit" && entity.attachedCoreId) {
+        const pilot = this.lastEntities.find((e) => e.id === entity.attachedCoreId);
+        this._drawCoreIndicator(entity, pilot?.typeKey === "motherboard" ? 0xfacc15 : 0x4ade80);
+      }
+      if (visible && entity.kind === "building" && entity.garrisonedUnitId) {
+        this._drawCoreIndicator(entity, 0xffffff);
+      }
     }
+  }
+
+  private _drawCoreIndicator(entity: EntitySnapshot, color: number): void {
+    if (!this.selectionGfx) return;
+    const cx = (entity.position.x + 0.85) * TILE_SIZE;
+    const cy = (entity.position.y + 0.15) * TILE_SIZE;
+    this.selectionGfx
+      .circle(cx, cy, 4)
+      .fill({ color, alpha: 0.95 });
   }
 
   private _drawSelectionRing(entity: EntitySnapshot): void {
@@ -486,11 +735,14 @@ export class GameRenderer {
     const worldW = this.mapWidthTiles * TILE_SIZE * zoom;
     const worldH = this.mapHeightTiles * TILE_SIZE * zoom;
 
-    // Clamp camera so the world fills the screen when possible
-    const maxCamX = Math.max(0, worldW - screenW);
-    const maxCamY = Math.max(0, worldH - screenH);
-    this.cameraX = Math.max(0, Math.min(this.cameraX, maxCamX));
-    this.cameraY = Math.max(0, Math.min(this.cameraY, maxCamY));
+    // Clamp camera so the world fills the screen when possible.
+    // Skip clamping until map dimensions are known (first state push sets mapWidthTiles).
+    if (this.mapWidthTiles > 0) {
+      const maxCamX = Math.max(0, worldW - screenW);
+      const maxCamY = Math.max(0, worldH - screenH);
+      this.cameraX = Math.max(0, Math.min(this.cameraX, maxCamX));
+      this.cameraY = Math.max(0, Math.min(this.cameraY, maxCamY));
+    }
 
     this.worldContainer.scale.set(zoom);
     this.worldContainer.x = -this.cameraX;
@@ -656,7 +908,19 @@ export class GameRenderer {
     const tileX = world.x / TILE_SIZE;
     const tileY = world.y / TILE_SIZE;
 
-    const hit = this.lastEntities.find((e) => !e.isShell && this._hitTest(e, tileX, tileY)) ?? null;
+    if (this.spellMode) {
+      const { kind, casterId } = this.spellMode;
+      this.setSpellMode(null);
+      if (kind === "fieryExplosion") {
+        this.config.onSpellTargetGround?.(casterId, kind, { x: tileX, y: tileY });
+      } else {
+        const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && this._hitTest(e, tileX, tileY)) ?? null;
+        if (hit) this.config.onSpellTargetUnit?.(casterId, kind, hit.id);
+      }
+      return;
+    }
+
+    const hit = this.lastEntities.find((e) => !e.isShell && !e.garrisoned && !e.inPlatform && this._hitTest(e, tileX, tileY)) ?? null;
 
     if (hit) {
       const now = Date.now();
@@ -707,7 +971,9 @@ export class GameRenderer {
     // Until capability filtering exists, all friendly units receive every order type
     // and the engine silently ignores orders the unit can't act on.
 
-    const hitEntity = this.lastEntities.find((e) => !e.isShell && this._hitTest(e, tileX, tileY));
+    const hitEntity = this.lastEntities.find(
+      (e) => !e.isShell && !e.garrisoned && !e.inPlatform && this._hitTest(e, tileX, tileY),
+    );
     if (hitEntity && this._fogValueAt(hitEntity.position.x, hitEntity.position.y) === 2) {
       // Builder right-clicking own under-construction building → resume construction
       if (
@@ -724,26 +990,90 @@ export class GameRenderer {
           return;
         }
       }
-      // Core right-clicking idle friendly platform → attach
+      // Core(s) right-clicking idle friendly platform → attach each to nearest available platform of same type
       if (
         hitEntity.faction === this.activeFaction &&
         hitEntity.kind === "unit" &&
         ROBOT_PLATFORM_TYPES.has(hitEntity.typeKey) &&
         !hitEntity.isShell
       ) {
-        const coreIds = friendlyIds.filter((id) => {
-          const e = this.lastEntities.find((ent) => ent.id === id);
-          return e?.typeKey === "core" && !e.isShell;
-        });
-        if (coreIds.length === 1) {
-          this.config.onAttachOrder?.(coreIds[0]!, hitEntity.id);
+        const cores = friendlyIds
+          .map((id) => this.lastEntities.find((e) => e.id === id))
+          .filter((e): e is NonNullable<typeof e> => !!e && (e.typeKey === "core" || e.typeKey === "motherboard") && !e.isShell);
+        if (cores.length > 0) {
+          // Available platforms: same type, same faction, no Core attached, not a shell
+          const available = this.lastEntities.filter(
+            (e) => e.kind === "unit" && e.faction === this.activeFaction &&
+              e.typeKey === hitEntity.typeKey && !e.attachedCoreId && !e.isShell
+          );
+          const claimed = new Set<string>();
+          for (const core of cores) {
+            let nearest: typeof available[0] | null = null;
+            let nearestDist = Infinity;
+            for (const plat of available) {
+              if (claimed.has(plat.id)) continue;
+              const d = Math.hypot(core.position.x - plat.position.x, core.position.y - plat.position.y);
+              if (d < nearestDist) { nearestDist = d; nearest = plat; }
+            }
+            if (nearest) {
+              claimed.add(nearest.id);
+              this.config.onAttachOrder?.(core.id, nearest.id);
+            }
+          }
           return;
         }
       }
       if (hitEntity.faction !== this.activeFaction) {
         this.config.onAttackOrder?.(friendlyIds, hitEntity.id);
-      } else if (hitEntity.id !== [...this.selectedIds][0]) {
-        this.config.onTalkOrder?.(friendlyIds, hitEntity.id);
+      } else if (hitEntity.kind === "unit") {
+        this.config.onFollowOrder?.(friendlyIds, hitEntity.id);
+      } else if (hitEntity.kind === "building") {
+        // Garrison order: evoker/archmage → operational wizard tower
+        if (
+          hitEntity.typeKey === "wizardTower" &&
+          hitEntity.buildingState === "operational" &&
+          !hitEntity.garrisonedUnitId
+        ) {
+          const eligible = this.lastEntities
+            .filter(e => friendlyIds.includes(e.id) && (e.typeKey === "evoker" || e.typeKey === "archmage") && !e.garrisoned)
+            .shift();
+          if (eligible) {
+            this.config.onGarrisonOrder?.(eligible.id, hitEntity.id);
+            return;
+          }
+        }
+        // Immobile Combat Platform entry: selected free Core(s) → platform with capacity.
+        if (
+          hitEntity.typeKey === "immobileCombatPlatform" &&
+          hitEntity.buildingState === "operational"
+        ) {
+          const capacity = robotBuildingStats["immobileCombatPlatform"]?.occupantCapacity ?? 1;
+          let remaining = capacity - (hitEntity.occupantCount ?? 0);
+          if (remaining > 0) {
+            const eligibleCores = this.lastEntities.filter(
+              (e) =>
+                friendlyIds.includes(e.id) &&
+                e.typeKey === "core" &&
+                !e.isShell &&
+                !e.inPlatform,
+            );
+            let issued = 0;
+            for (const core of eligibleCores) {
+              if (remaining <= 0) break;
+              this.config.onEnterPlatformOrder?.(core.id, hitEntity.id);
+              remaining--;
+              issued++;
+            }
+            if (issued > 0) return;
+          }
+        }
+        // Move toward / surround friendly building
+        const fp = hitEntity.faction === "wizards"
+          ? (wizardBuildingStats[hitEntity.typeKey]?.footprintTiles ?? 1)
+          : (robotBuildingStats[hitEntity.typeKey]?.footprintTiles ?? 1);
+        const cx = hitEntity.position.x + fp / 2;
+        const cy = hitEntity.position.y + fp / 2;
+        this.config.onMoveOrder?.(friendlyIds, { x: cx, y: cy });
       }
       return;
     }
@@ -778,9 +1108,9 @@ export class GameRenderer {
   }
 
   private readonly _onKeyDownBuild = (e: KeyboardEvent): void => {
-    if (e.key === "Escape" && this.buildMode) {
-      this.buildMode = null;
-      this._clearGhost();
+    if (e.key === "Escape") {
+      if (this.buildMode) { this.buildMode = null; this._clearGhost(); }
+      if (this.spellMode) this.setSpellMode(null);
     }
   };
 
@@ -876,6 +1206,7 @@ export class GameRenderer {
     return this.lastEntities.filter((e) => {
       if (e.kind !== "unit" || e.faction !== this.activeFaction) return false;
       if (e.attachedPlatformTypeKey || e.isShell) return false;
+      if (e.garrisoned || e.inPlatform) return false;
       const sx = (e.position.x + 0.5) * TILE_SIZE * zoom - this.cameraX;
       const sy = (e.position.y + 0.5) * TILE_SIZE * zoom - this.cameraY;
       return sx >= minX && sx <= maxX && sy >= minY && sy <= maxY;
@@ -895,6 +1226,13 @@ export class GameRenderer {
   setBuildMode(mode: { typeKey: string; footprintTiles: number; faction: "wizards" | "robots" } | null): void {
     this.buildMode = mode;
     if (!mode) this._clearGhost();
+  }
+
+  setSpellMode(mode: { kind: string; casterId: string } | null): void {
+    this.spellMode = mode;
+    if (this.app) {
+      (this.app.canvas as HTMLCanvasElement).style.cursor = mode ? "crosshair" : "";
+    }
   }
 
   setZoom(zoomLevel: ZoomLevel): void {
@@ -933,6 +1271,10 @@ export class GameRenderer {
     }
     this.fogTexture?.destroy(true);
     this.fogTexture = null;
+    for (const p of this.liveProjectiles) p.gfx.destroy();
+    this.liveProjectiles = [];
+    for (const ae of this.liveAreaEffects) ae.gfx.destroy();
+    this.liveAreaEffects = [];
     for (const sprite of this.tileSprites.values()) sprite.destroy();
     this.tileSprites.clear();
     for (const sprite of this.entitySprites.values()) sprite.destroy();

@@ -1,7 +1,7 @@
 // Game simulation engine — pure TypeScript, no imports from /renderer, /ui, /store.
 // Pushes GameStateSnapshot to the store bridge after each tick via onTick callback.
 
-import type { Faction, GameStateSnapshot, Vec2, DepositSnapshot } from "@neither/shared";
+import type { Faction, FactionStats, GameStateSnapshot, Vec2, DepositSnapshot, AttackEvent, SpellEvent } from "@neither/shared";
 import {
   startingResources,
   mapSizes,
@@ -33,8 +33,15 @@ import {
   xpRates,
   manaGen,
   spellCosts,
+  spellEffects,
+  clericConfig,
   manaConfig,
   amphitheatreXpBoost,
+  wizardTowerConfig,
+  immobileCombatPlatformConfig,
+  MILITARY_ROLES,
+  CIVILIAN_UNIT_TYPES,
+  DEFENSIVE_BUILDING_TYPES,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
@@ -48,10 +55,12 @@ import { Entity } from "./entities/Entity.js";
 import { UnitEntity } from "./entities/UnitEntity.js";
 import { BuildingEntity } from "./entities/BuildingEntity.js";
 import { findPath } from "./spatial/Pathfinder.js";
+import { MilitaryAI } from "./ai/MilitaryAI.js";
 
 export type GameEngineConfig = {
   mapSize?: MapSize;
   seed?: number | undefined;
+  playerFaction?: Faction;
   onTick: (state: GameStateSnapshot) => void;
   onAlert?: (message: string) => void;
 };
@@ -61,6 +70,10 @@ export type ResourcePool = { wood: number; water: number; mana: number };
 const FACTIONS: Faction[] = ["wizards", "robots"];
 /** Ticks a unit waits on a blocked waypoint before replanning (~167ms at 60 ticks/s). */
 const REPLAN_THRESHOLD = 10;
+/** Ticks a unit waits behind a moving blocker before replanning — handles head-on deadlocks (~333ms). */
+const DEADLOCK_THRESHOLD = 20;
+/** Ticks a gatherer/dropoff unit waits before retrying pathfinding when no route is found (~1.5s). */
+const GATHER_RETRY_DELAY_TICKS = 90;
 /**
  * Unit types allowed to issue gather orders. Leaders + basic civilian units only.
  * TODO(capabilities): make this data-driven once a unit capability system exists.
@@ -83,8 +96,6 @@ const WIZARD_UNIT_TYPES = new Set(Object.keys(wizardUnitStats));
  * TODO: ideally driven by unit vision range from FogOfWar once that API is stable.
  */
 const GATHER_SEARCH_RADIUS = 20;
-/** Default unit vision radius in tiles. Separate from attack range. Initial guess — increase after playtesting. */
-const UNIT_VISION_TILES = 8;
 /** Vision radius for an unattached robot platform — low until a Core provides guidance. */
 const UNATTACHED_PLATFORM_VISION_TILES = 2;
 
@@ -110,13 +121,20 @@ export class GameEngine {
   /** depositId → unitId currently harvesting that deposit (one gatherer per tile). */
   private readonly depositOccupants = new Map<string, string>();
 
+  /** Attacks that fired this tick — included in snapshot, cleared after each tick. */
+  private _attackEvents: AttackEvent[] = [];
+  /** Spells cast this tick — included in snapshot, cleared after each tick. */
+  private _spellEvents: SpellEvent[] = [];
+
   /** Research items permanently unlocked per faction. */
   private readonly _completedResearch = new Map<Faction, Set<string>>([
     ["wizards", new Set<string>()],
     ["robots",  new Set<string>()],
   ]);
 
-  constructor({ mapSize = "medium", seed, onTick, onAlert }: GameEngineConfig) {
+  private readonly _ai: MilitaryAI | null;
+
+  constructor({ mapSize = "medium", seed, playerFaction, onTick, onAlert }: GameEngineConfig) {
     this.onTick = onTick;
     this.onAlert = onAlert;
     this.entities = new EntityManager();
@@ -144,6 +162,25 @@ export class GameEngine {
 
     this._spawnStartingEntities();
     this.loop = new GameLoop(this.tick.bind(this));
+
+    if (playerFaction) {
+      const aiFaction: Faction = playerFaction === "wizards" ? "robots" : "wizards";
+      this._ai = new MilitaryAI(aiFaction);
+    } else {
+      this._ai = null;
+    }
+  }
+
+  getResources(faction: Faction): ResourcePool {
+    return this.resources[faction];
+  }
+
+  getPopulation(faction: Faction): { count: number; cap: number } {
+    return this._computePopulation()[faction];
+  }
+
+  isValidBuildSite(faction: Faction, typeKey: string, pos: Vec2): boolean {
+    return this._isValidBuildSite(faction, typeKey, pos);
   }
 
   private _spawnStartingEntities(): void {
@@ -158,7 +195,8 @@ export class GameEngine {
       stats: {
         maxHp: wizardBuildingStats.castle!.hp,
         damage: 0,
-        range: wizardBuildingStats.castle!.visionRange,
+        attackRange: 0,
+        sightRange: wizardBuildingStats.castle!.visionRange,
         speed: 0,
         charisma: 0,
         armor: 0,
@@ -179,7 +217,8 @@ export class GameEngine {
       stats: {
         maxHp: archmageStats.hp,
         damage: archmageStats.damage,
-        range: archmageStats.range,
+        attackRange: archmageStats.attackRange,
+        sightRange: archmageStats.sightRange,
         speed: archmageStats.speed,
         charisma: archmageStats.charisma,
         armor: archmageStats.armor,
@@ -187,6 +226,7 @@ export class GameEngine {
       },
       isNamed: true,
       name: namedLeaders.wizards.name,
+      cannotBeConverted: archmageStats.cannotBeConverted ?? false,
     });
     this.entities.add(archmage);
 
@@ -200,7 +240,8 @@ export class GameEngine {
         stats: {
           maxHp: surfStats.hp,
           damage: surfStats.damage,
-          range: surfStats.range,
+          attackRange: surfStats.attackRange,
+          sightRange: surfStats.sightRange,
           speed: surfStats.speed,
           charisma: surfStats.charisma,
           armor: surfStats.armor,
@@ -218,7 +259,8 @@ export class GameEngine {
       stats: {
         maxHp: robotBuildingStats.home!.hp,
         damage: 0,
-        range: robotBuildingStats.home!.visionRange,
+        attackRange: 0,
+        sightRange: robotBuildingStats.home!.visionRange,
         speed: 0,
         charisma: 0,
         armor: 0,
@@ -231,27 +273,30 @@ export class GameEngine {
     this._blockBuildingTiles(robHome);
 
     // Named Motherboard leader — add before finding next tile
-    const coreStats = robotUnitStats.core!;
+    const motherboardStats = robotUnitStats.motherboard!;
     const motherboard = new UnitEntity({
       faction: "robots",
       typeKey: namedLeaders.robots.typeKey,
       position: this._findSpawnTile(robHome) ?? { x: robPos.x, y: robPos.y + 4 },
       stats: {
-        maxHp: coreStats.hpWood,
-        damage: coreStats.damage,
-        range: coreStats.range,
-        speed: coreStats.speed,
-        charisma: coreStats.charisma,
-        armor: coreStats.armorWood,
-        capacity: coreStats.capacity,
+        maxHp: motherboardStats.hpWood,
+        damage: motherboardStats.damage,
+        attackRange: motherboardStats.attackRange,
+        sightRange: motherboardStats.sightRange,
+        speed: motherboardStats.speed,
+        charisma: motherboardStats.charisma,
+        armor: motherboardStats.armorWood,
+        capacity: motherboardStats.capacity,
       },
       isNamed: true,
       name: namedLeaders.robots.name,
+      cannotBeConverted: motherboardStats.cannotBeConverted ?? false,
     });
     motherboard.materialType = "wood";
     this.entities.add(motherboard);
 
     // 2 regular cores flanking
+    const coreStats = robotUnitStats.core!;
     for (let i = 0; i < 2; i++) {
       const core = new UnitEntity({
         faction: "robots",
@@ -260,7 +305,8 @@ export class GameEngine {
         stats: {
           maxHp: coreStats.hpWood,
           damage: coreStats.damage,
-          range: coreStats.range,
+          attackRange: coreStats.attackRange,
+          sightRange: coreStats.sightRange,
           speed: coreStats.speed,
           charisma: coreStats.charisma,
           armor: coreStats.armorWood,
@@ -289,24 +335,78 @@ export class GameEngine {
     this._releaseDepositOccupancy(unit);
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
 
-    const blockedByUnits: Vec2[] = [];
-    for (const u of this.entities.units()) {
-      if (u.id === entityId) continue;
-      const tx = Math.round(u.position.x);
-      const ty = Math.round(u.position.y);
-      if (!this.grid.isBlocked(tx, ty)) {
-        this.grid.blockTile(tx, ty);
-        blockedByUnits.push({ x: tx, y: ty });
-      }
-    }
-
-    const goal = this._nearestPassable({ x: Math.floor(target.x), y: Math.floor(target.y) });
-    const path = goal ? findPath(this.grid, start, goal) : null;
-
-    for (const pos of blockedByUnits) this.grid.unblockTile(pos.x, pos.y);
+    const goal = this._nearestGoalForUnit(unit, { x: Math.floor(target.x), y: Math.floor(target.y) });
+    const path = goal ? this._findPathForUnit(unit, start, goal) : null;
 
     if (!path) return;
     unit.state = { kind: "moving", targetPosition: goal!, path, yieldTicks: 0 };
+  }
+
+  issueGroupMoveOrder(entityIds: string[], target: Vec2): void {
+    if (entityIds.length === 0) return;
+    if (entityIds.length === 1) { this.issueMoveOrder(entityIds[0]!, target); return; }
+
+    const tgt = { x: Math.floor(target.x), y: Math.floor(target.y) };
+
+    // Gather eligible units, sorted closest-to-target first
+    const units: UnitEntity[] = [];
+    for (const id of entityIds) {
+      const e = this.entities.get(id);
+      if (!e || e.kind !== "unit") continue;
+      const u = e as UnitEntity;
+      if (ROBOT_PLATFORM_TYPES.has(u.typeKey) && !u.attachedCoreId) continue;
+      units.push(u);
+    }
+    units.sort((a, b) =>
+      Math.hypot(a.position.x - tgt.x, a.position.y - tgt.y) -
+      Math.hypot(b.position.x - tgt.x, b.position.y - tgt.y)
+    );
+
+    // Generate candidate tiles spiralling outward from target
+    const R = Math.ceil(Math.sqrt(units.length)) + 3;
+    const candidates: Vec2[] = [];
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        candidates.push({ x: tgt.x + dx, y: tgt.y + dy });
+      }
+    }
+    candidates.sort(
+      (a, b) => (a.x - tgt.x) ** 2 + (a.y - tgt.y) ** 2 - ((b.x - tgt.x) ** 2 + (b.y - tgt.y) ** 2)
+    );
+
+    // All group members are excluded from each other's obstacle sets
+    const groupIds = new Set(units.map((u) => u.id));
+
+    // Assign each unit a unique destination
+    const claimed = new Set<string>();
+    for (const unit of units) {
+      this._releaseDepositOccupancy(unit);
+      const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+      let assigned = false;
+      for (const pos of candidates) {
+        const goal = this._nearestGoalForUnit(unit, pos);
+        if (!goal) continue;
+        const gk = `${goal.x},${goal.y}`;
+        if (claimed.has(gk)) continue;
+        const path = this._findPathForUnit(unit, start, goal, groupIds);
+        if (!path) continue;
+        claimed.add(gk);
+        unit.state = { kind: "moving", targetPosition: goal, path, yieldTicks: 0 };
+        assigned = true;
+        break;
+      }
+      if (!assigned) unit.state = { kind: "idle" };
+    }
+  }
+
+  issueFollowOrder(unitId: string, targetId: string): void {
+    const entity = this.entities.get(unitId);
+    if (!entity || entity.kind !== "unit") return;
+    const unit = entity as UnitEntity;
+    if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
+    if (unit.id === targetId) return;
+    this._releaseDepositOccupancy(unit);
+    unit.state = { kind: "following", targetId, path: [], yieldTicks: 0 };
   }
 
   issueStopOrder(entityId: string): void {
@@ -324,8 +424,8 @@ export class GameEngine {
     if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
     this._releaseDepositOccupancy(unit);
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
-    const goal = this._nearestPassable({ x: Math.floor(pointB.x), y: Math.floor(pointB.y) });
-    const path = goal ? findPath(this.grid, start, goal) : null;
+    const goal = this._nearestGoalForUnit(unit, { x: Math.floor(pointB.x), y: Math.floor(pointB.y) });
+    const path = goal ? this._findPathForUnit(unit, start, goal) : null;
     if (!path || path.length === 0) return;
     unit.state = {
       kind: "patrolling",
@@ -341,7 +441,12 @@ export class GameEngine {
     const entity = this.entities.get(entityId);
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
-    if (!GATHERER_TYPES.has(unit.typeKey)) return;
+    if (!GATHERER_TYPES.has(unit.typeKey)) {
+      // Non-gatherers move toward the deposit instead
+      const deposit = this.deposits.find((d) => d.id === depositId);
+      if (deposit) this.issueMoveOrder(entityId, deposit.position);
+      return;
+    }
 
     // Release any current deposit occupancy before reassigning
     this._releaseDepositOccupancy(unit);
@@ -355,21 +460,11 @@ export class GameEngine {
 
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
 
-    const blockedByUnits: Vec2[] = [];
-    for (const u of this.entities.units()) {
-      if (u.id === entityId) continue;
-      const tx = Math.round(u.position.x);
-      const ty = Math.round(u.position.y);
-      if (!this.grid.isBlocked(tx, ty)) {
-        this.grid.blockTile(tx, ty);
-        blockedByUnits.push({ x: tx, y: ty });
-      }
-    }
-
-    const goal = this._nearestPassable({ x: Math.floor(deposit.position.x), y: Math.floor(deposit.position.y) });
+    const goal = this._nearestGoalForUnit(unit, { x: Math.floor(deposit.position.x), y: Math.floor(deposit.position.y) });
+    // Terrain-only pathfinding — other units are not obstacles here; the movement
+    // system handles yielding at runtime, so blocking unit positions causes false
+    // "no path" failures for deposits near congested starting areas.
     const path = goal ? findPath(this.grid, start, goal) : null;
-
-    for (const pos of blockedByUnits) this.grid.unblockTile(pos.x, pos.y);
 
     if (!path) return;
     unit.state = { kind: "gatherMove", depositId, path, yieldTicks: 0 };
@@ -380,6 +475,15 @@ export class GameEngine {
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
     if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
+    const targetEntity = this.entities.get(targetId);
+    if (!targetEntity) return;
+    if (targetEntity.kind === "unit") {
+      const t = targetEntity as UnitEntity;
+      if (t.isFlying && !unit.canAttackAir) return;
+      // Hidden occupants of towers / platforms / ICPs are unreachable — damage must
+      // go through the containing building.
+      if (t.state.kind === "platformShell" || t.state.kind === "garrisoned" || t.state.kind === "inPlatform") return;
+    }
     this._releaseDepositOccupancy(unit);
     unit.state = { kind: "attacking", targetId, path: [], yieldTicks: 0 };
   }
@@ -387,6 +491,8 @@ export class GameEngine {
   issueTalkOrder(unitId: string, targetId: string): void {
     const entity = this.entities.get(unitId);
     if (!entity || entity.kind !== "unit") return;
+    const target = this.entities.get(targetId);
+    if (target?.kind === "unit" && (target as UnitEntity).cannotBeConverted) return;
     // TODO(phase-diplomacy): talk/conversion logic not yet implemented.
     // When diplomacy phase lands: check unit has charisma capability, path to target,
     // then transition to converting state and run charisma checks each tick.
@@ -432,6 +538,20 @@ export class GameEngine {
     }
     // Also skip the pop-cap check entirely when the unit being queued doesn't consume pop
     if (cap > 0 && consumesPop(unitTypeKey) && count + pendingPop >= cap) return;
+
+    // Dragon Hoard gate: each operational Hoard supports exactly one Dragon
+    if (unitTypeKey === "dragon" && building.faction === "wizards") {
+      const hoardCount = this.entities.buildingsByFaction("wizards")
+        .filter((b) => b.typeKey === "dragonHoard" && b.isOperational).length;
+      const liveDragons = this.entities.unitsByFaction("wizards")
+        .filter((u) => u.typeKey === "dragon").length;
+      let queuedDragons = 0;
+      for (const b of this.entities.buildingsByFaction("wizards")) {
+        if (b.state.kind === "producing" && b.state.unitTypeKey === "dragon") queuedDragons++;
+        queuedDragons += b.productionQueue.filter((k) => k === "dragon").length;
+      }
+      if (liveDragons + queuedDragons >= hoardCount) return;
+    }
 
     // Deduct resources at enqueue time
     res.wood -= cost.wood;
@@ -531,7 +651,7 @@ export class GameEngine {
     const coreEntity = this.entities.get(coreId);
     if (!coreEntity || coreEntity.kind !== "unit") return;
     const core = coreEntity as UnitEntity;
-    if (core.typeKey !== "core" || core.faction !== "robots" || core.attachedPlatformTypeKey) return;
+    if ((core.typeKey !== "core" && core.typeKey !== "motherboard") || core.faction !== "robots" || core.attachedPlatformTypeKey) return;
 
     const platformEntity = this.entities.get(platformId);
     if (!platformEntity || platformEntity.kind !== "unit") return;
@@ -564,7 +684,7 @@ export class GameEngine {
     for (const d of dirs) {
       const tx = px + d.x;
       const ty = py + d.y;
-      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, core.id)) {
+      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, core.id, false)) {
         ejectPos = { x: tx, y: ty };
         break;
       }
@@ -579,11 +699,143 @@ export class GameEngine {
     platform.state = { kind: "idle" }; // cancel any in-flight movement
   }
 
+  issueGarrisonOrder(unitId: string, towerId: string): void {
+    const unitEntity = this.entities.get(unitId);
+    if (!unitEntity || unitEntity.kind !== "unit") return;
+    const unit = unitEntity as UnitEntity;
+    if (unit.faction !== "wizards") return;
+    if (unit.typeKey !== "evoker" && unit.typeKey !== "archmage") return;
+    if (unit.garrisonedBuildingId) return;
+
+    const towerEntity = this.entities.get(towerId);
+    if (!towerEntity || towerEntity.kind !== "building") return;
+    const tower = towerEntity as BuildingEntity;
+    if (tower.typeKey !== "wizardTower" || !tower.isOperational || tower.garrisonedUnitId) return;
+
+    this._releaseDepositOccupancy(unit);
+    const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+    const goal = this._nearestAttachTile(tower.position, unit.position);
+    if (!goal) return;
+    // null = no path found; don't allow empty path fallback or unit teleports to tower
+    const path = this._findPathForUnit(unit, start, goal) ?? findPath(this.grid, start, goal);
+    if (path === null) return;
+    unit.state = { kind: "garrisonMove", buildingId: towerId, path, yieldTicks: 0 };
+  }
+
+  issueLeaveGarrisonOrder(unitId: string, minUnitHp = 0): void {
+    const unitEntity = this.entities.get(unitId);
+    if (!unitEntity || unitEntity.kind !== "unit") return;
+    const unit = unitEntity as UnitEntity;
+    if (unit.state.kind !== "garrisoned") return;
+
+    const towerEntity = this.entities.get(unit.state.buildingId);
+    const tower = towerEntity?.kind === "building" ? towerEntity as BuildingEntity : null;
+
+    const px = Math.round(unit.position.x);
+    const py = Math.round(unit.position.y);
+    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
+    let ejectPos: Vec2 = { x: px + 1, y: py };
+    for (const d of dirs) {
+      const tx = px + d.x;
+      const ty = py + d.y;
+      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, unit.id, false)) {
+        ejectPos = { x: tx, y: ty };
+        break;
+      }
+    }
+
+    if (tower) this._releaseFromBuilding(unit, tower, minUnitHp);
+    unit.position = ejectPos;
+    unit.garrisonedBuildingId = null;
+    unit.state = { kind: "idle" };
+    if (tower) tower.garrisonedUnitId = null;
+  }
+
+  /** Send a free Core to enter an Immobile Combat Platform. */
+  issueEnterPlatformOrder(coreId: string, platformId: string): void {
+    const coreEntity = this.entities.get(coreId);
+    if (!coreEntity || coreEntity.kind !== "unit") return;
+    const core = coreEntity as UnitEntity;
+    if (core.typeKey !== "core") return;
+    if (core.state.kind === "platformShell" || core.attachedPlatformId) return;
+
+    const platformEntity = this.entities.get(platformId);
+    if (!platformEntity || platformEntity.kind !== "building") return;
+    const platform = platformEntity as BuildingEntity;
+    if (platform.typeKey !== "immobileCombatPlatform" || !platform.isOperational) return;
+    if (platform.faction !== core.faction) return;
+
+    const factionStats = robotBuildingStats;
+    const cap = factionStats[platform.typeKey]?.occupantCapacity ?? 1;
+    if (platform.occupantIds.size >= cap) return;
+    if (platform.occupantIds.has(core.id)) return;
+
+    this._releaseDepositOccupancy(core);
+    const start = { x: Math.round(core.position.x), y: Math.round(core.position.y) };
+    const goal = this._nearestAttachTile(platform.position, core.position);
+    if (!goal) return;
+    const path = this._findPathForUnit(core, start, goal) ?? findPath(this.grid, start, goal);
+    if (path === null) return;
+    core.state = { kind: "enterPlatformMove", platformId, path, yieldTicks: 0 };
+  }
+
+  /** Eject a Core from the Immobile Combat Platform it currently occupies. */
+  issueLeavePlatformOrder(coreId: string, minUnitHp = 0): void {
+    const coreEntity = this.entities.get(coreId);
+    if (!coreEntity || coreEntity.kind !== "unit") return;
+    const core = coreEntity as UnitEntity;
+    if (core.state.kind !== "inPlatform") return;
+
+    const platformEntity = this.entities.get(core.state.platformId);
+    const platform = platformEntity?.kind === "building" ? (platformEntity as BuildingEntity) : null;
+
+    const anchor = platform ? platform.position : core.position;
+    const px = Math.round(anchor.x);
+    const py = Math.round(anchor.y);
+    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
+    let ejectPos: Vec2 = { x: px + 1, y: py };
+    for (const d of dirs) {
+      const tx = px + d.x;
+      const ty = py + d.y;
+      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, core.id, false)) {
+        ejectPos = { x: tx, y: ty };
+        break;
+      }
+    }
+
+    if (platform) this._releaseFromBuilding(core, platform, minUnitHp);
+    core.position = ejectPos;
+    core.state = { kind: "idle" };
+    if (platform) platform.occupantIds.delete(core.id);
+  }
+
+  /** Building-side eject: the garrisoned unit (wizardTower) or all occupant Cores
+   *  (immobileCombatPlatform) exit. Called from the building's commands panel
+   *  since the occupants are invisible on the map and can't be right-clicked. */
+  issueEjectOccupantsOrder(buildingId: string): void {
+    const entity = this.entities.get(buildingId);
+    if (!entity || entity.kind !== "building") return;
+    const building = entity as BuildingEntity;
+    if (building.garrisonedUnitId) {
+      this.issueLeaveGarrisonOrder(building.garrisonedUnitId);
+    }
+    if (building.occupantIds.size > 0) {
+      for (const id of [...building.occupantIds]) {
+        this.issueLeavePlatformOrder(id);
+      }
+    }
+  }
+
   issueBuildOrder(unitId: string, buildingTypeKey: string, topLeft: Vec2): void {
     const entity = this.entities.get(unitId);
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
     if (!BUILDER_UNIT_TYPES.has(unit.typeKey)) return;
+    // Robot build kits need a Core attached — without one they can't self-move, so
+    // they can't walk to the site either. Matches the issueMoveOrder rule.
+    if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
 
     if (!this._isValidBuildSite(unit.faction, buildingTypeKey, topLeft)) return;
 
@@ -607,7 +859,8 @@ export class GameEngine {
       stats: {
         maxHp: bStats.hp,
         damage: 0,
-        range: bStats.visionRange,
+        attackRange: 0,
+        sightRange: bStats.visionRange,
         speed: 0,
         charisma: 0,
         armor: 0,
@@ -671,6 +924,12 @@ export class GameEngine {
   private _processConstruction(): void {
     for (const unit of this.entities.units()) {
       if (unit.state.kind !== "constructing") continue;
+      // Robot build kits that had their Core detached mid-construction can no longer
+      // work. Snap them back to idle — without a Core they can't operate at all.
+      if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) {
+        unit.state = { kind: "idle" };
+        continue;
+      }
       const { buildingId } = unit.state;
       const bEntity = this.entities.get(buildingId);
       if (!bEntity || bEntity.kind !== "building") { unit.state = { kind: "idle" }; continue; }
@@ -694,6 +953,7 @@ export class GameEngine {
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
     if (!BUILDER_UNIT_TYPES.has(unit.typeKey)) return;
+    if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) return;
 
     const bEntity = this.entities.get(buildingId);
     if (!bEntity || bEntity.kind !== "building") return;
@@ -757,16 +1017,168 @@ export class GameEngine {
 
   // ── Movement ─────────────────────────────────────────────────────────────────
 
+  private _syncGarrisonedPositions(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind === "garrisoned") {
+        const tower = this.entities.get(unit.state.buildingId);
+        if (tower) unit.position = { ...tower.position };
+        else { unit.garrisonedBuildingId = null; unit.state = { kind: "idle" }; }
+      } else if (unit.state.kind === "inPlatform") {
+        const platform = this.entities.get(unit.state.platformId) as BuildingEntity | undefined;
+        if (platform) unit.position = { ...platform.position };
+        else unit.state = { kind: "idle" };
+      }
+    }
+  }
+
+  private _processFollowing(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.stats.hp <= 0 || !this.entities.has(unit.id)) continue;
+      if (unit.state.kind !== "following") continue;
+      const { targetId } = unit.state;
+      const target = this.entities.get(targetId);
+      if (!target || target.stats.hp <= 0) { unit.state = { kind: "idle" }; continue; }
+
+      const dist = Math.hypot(unit.position.x - target.position.x, unit.position.y - target.position.y);
+      if (dist <= 1.5) {
+        unit.state = { ...unit.state, path: [], yieldTicks: 0 };
+        continue;
+      }
+
+      if (unit.state.path.length === 0) {
+        const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+        const goal = this._nearestGoalForUnit(unit, { x: Math.round(target.position.x), y: Math.round(target.position.y) });
+        const path = goal ? this._findPathForUnit(unit, start, goal) : null;
+        if (path && path.length > 0) unit.state = { ...unit.state, path, yieldTicks: 0 };
+      }
+    }
+  }
+
   private _processMovement(): void {
     for (const unit of this.entities.units()) {
       const kind = unit.state.kind;
-      if (kind === "moving" || kind === "patrolling" || kind === "gatherMove" || kind === "dropoffMove" || kind === "buildMove" || kind === "attacking" || kind === "attachMove") {
+      if (kind === "moving" || kind === "patrolling" || kind === "gatherMove" || kind === "dropoffMove" || kind === "buildMove" || kind === "attacking" || kind === "attachMove" || kind === "following" || kind === "garrisonMove" || kind === "enterPlatformMove") {
         this._advanceUnit(unit, TICK_MS / 1000);
       }
     }
   }
 
+  private _processGarrisonedAttacks(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind !== "garrisoned") continue;
+      if (!this.entities.has(unit.id) || unit.stats.hp <= 0) continue;
+      if (unit.attackCooldownTicks > 0) { unit.attackCooldownTicks--; continue; }
+
+      const effectiveRange = unit.stats.attackRange + wizardTowerConfig.rangeBonus;
+      let bestTarget: Entity | null = null;
+      let bestDist = Infinity;
+      for (const e of this.entities.all()) {
+        if (e.faction === unit.faction) continue;
+        if (e.stats.hp <= 0) continue;
+        if (e.kind === "unit") {
+          const eu = e as UnitEntity;
+          if (eu.state.kind === "platformShell" || eu.state.kind === "garrisoned" || eu.state.kind === "inPlatform") continue;
+        }
+        if (e.kind === "unit" && (e as UnitEntity).isFlying && !unit.canAttackAir) continue;
+        const d = Math.hypot(e.position.x - unit.position.x, e.position.y - unit.position.y);
+        if (d <= effectiveRange && d < bestDist) { bestDist = d; bestTarget = e; }
+      }
+      if (!bestTarget) continue;
+
+      let dmg = Math.max(0, unit.stats.damage + wizardTowerConfig.damageBonus - bestTarget.stats.armor);
+      if (bestTarget.kind === "unit" && (bestTarget as UnitEntity).manaShielded)
+        dmg = Math.floor(dmg * (1 - spellCosts.manaShieldDamageReduction));
+      bestTarget.stats.hp -= dmg;
+
+      this._attackEvents.push({
+        attackerId: unit.id,
+        targetId: bestTarget.id,
+        attackerPos: { ...unit.position },
+        targetPos: { ...bestTarget.position },
+        ranged: effectiveRange > 1,
+      });
+
+      const statConfig = wizardUnitStats[unit.typeKey];
+      unit.attackCooldownTicks = Math.round((statConfig?.attackIntervalSec ?? 1.0) * TICKS_PER_SEC);
+
+      if (bestTarget.stats.hp <= 0) this._handleEntityDeath(bestTarget, unit.id);
+    }
+  }
+
+  /**
+   * Immobile Combat Platform fire loop.
+   *
+   * Shell model. Zero Cores → no attack. 1+ Cores → platform fires with fixed
+   * `baseDamage` and `baseAttackRange`; each additional Core linearly scales the
+   * attack rate by shortening the cooldown (interval = baseInterval / occupants).
+   * Sight range is separately boosted per-Core in `_buildingVisionRange`. The
+   * platform can target air — a turret with a stack of Cores pointing up is
+   * plausibly anti-air, and wizards/robots need *something* cheap that shoots
+   * flyers without tech-tree gating.
+   */
+  private _processImmobileCombatPlatformAttacks(): void {
+    for (const platform of this.entities.buildings()) {
+      if (platform.typeKey !== "immobileCombatPlatform" || !platform.isOperational) continue;
+      if (platform.stats.hp <= 0 || !this.entities.has(platform.id)) continue;
+
+      // Sweep stale occupant refs — a Core removed through a non-standard path would
+      // inflate `occupantIds.size` and mis-report the turret's firing rate. A valid
+      // occupant is still in the entity map, still a unit, and still in `inPlatform`
+      // state pointing at *this* platform.
+      for (const id of [...platform.occupantIds]) {
+        const occ = this.entities.get(id);
+        if (!occ || occ.kind !== "unit") { platform.occupantIds.delete(id); continue; }
+        const ou = occ as UnitEntity;
+        if (ou.state.kind !== "inPlatform" || ou.state.platformId !== platform.id) {
+          platform.occupantIds.delete(id);
+        }
+      }
+
+      const occupants = platform.occupantIds.size;
+      if (occupants === 0) continue;
+
+      if (platform.attackCooldownTicks > 0) { platform.attackCooldownTicks--; continue; }
+
+      const damage = immobileCombatPlatformConfig.baseDamage;
+      const attackRange = immobileCombatPlatformConfig.baseAttackRange;
+      const intervalSec = immobileCombatPlatformConfig.baseAttackIntervalSec / occupants;
+
+      let bestTarget: Entity | null = null;
+      let bestDist = Infinity;
+      for (const e of this.entities.all()) {
+        if (e.faction === platform.faction) continue;
+        if (e.stats.hp <= 0) continue;
+        if (e.kind === "unit") {
+          const eu = e as UnitEntity;
+          if (eu.state.kind === "platformShell" || eu.state.kind === "garrisoned" || eu.state.kind === "inPlatform") continue;
+        }
+        const d = Math.hypot(e.position.x - platform.position.x, e.position.y - platform.position.y);
+        if (d <= attackRange && d < bestDist) { bestDist = d; bestTarget = e; }
+      }
+      if (!bestTarget) continue;
+
+      let dmg = Math.max(0, damage - bestTarget.stats.armor);
+      if (bestTarget.kind === "unit" && (bestTarget as UnitEntity).manaShielded) {
+        dmg = Math.floor(dmg * (1 - spellCosts.manaShieldDamageReduction));
+      }
+      bestTarget.stats.hp -= dmg;
+
+      this._attackEvents.push({
+        attackerId: platform.id,
+        targetId: bestTarget.id,
+        attackerPos: { ...platform.position },
+        targetPos: { ...bestTarget.position },
+        ranged: true,
+      });
+
+      platform.attackCooldownTicks = Math.round(intervalSec * TICKS_PER_SEC);
+
+      if (bestTarget.stats.hp <= 0) this._handleEntityDeath(bestTarget, platform.id);
+    }
+  }
+
   private _advanceUnit(unit: UnitEntity, stepSecs: number): void {
+    if (unit.stats.hp <= 0 || !this.entities.has(unit.id)) return;
     const state = unit.state;
     if (
       state.kind !== "moving" &&
@@ -775,20 +1187,97 @@ export class GameEngine {
       state.kind !== "dropoffMove" &&
       state.kind !== "buildMove" &&
       state.kind !== "attacking" &&
-      state.kind !== "attachMove"
+      state.kind !== "attachMove" &&
+      state.kind !== "following" &&
+      state.kind !== "garrisonMove" &&
+      state.kind !== "enterPlatformMove"
     ) return;
     if (state.kind === "attacking" && state.path.length === 0) return;
+    if (state.kind === "following" && state.path.length === 0) return;
 
     let remaining = unit.stats.speed * stepSecs;
 
     while (remaining > 0 && state.path.length > 0) {
       const next = state.path[0]!;
 
-      // Yield if next tile is occupied by another unit
-      if (this._tileOccupiedByUnit(next.x, next.y, unit.id)) {
+      // Yield if next tile is occupied by another unit of the same layer (flying vs ground)
+      if (this._tileOccupiedByUnit(next.x, next.y, unit.id, unit.isFlying)) {
+        const blocker = this._unitAt(next.x, next.y, unit.id, unit.isFlying);
+        const blockerMoving = blocker && blocker.state.kind !== "idle" && blocker.state.kind !== "gathering" && blocker.state.kind !== "constructing" && blocker.state.kind !== "converting" && blocker.state.kind !== "platformShell" && blocker.state.kind !== "garrisoned" && blocker.state.kind !== "inPlatform";
+
+        const isApproach = state.kind === "gatherMove" || state.kind === "dropoffMove" ||
+          state.kind === "garrisonMove" || state.kind === "attachMove" || state.kind === "buildMove" ||
+          state.kind === "enterPlatformMove";
+        const isFinalTile = state.path.length === 1;
+
+        if (!blockerMoving) {
+          // Stationary blocker: on first block attempt, try to find a detour around idle units.
+          if (state.yieldTicks === 0 && !isFinalTile) {
+            const finalGoal = state.path[state.path.length - 1]!;
+            const cur = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+            const detour = this._findPathAroundIdleUnits(unit, cur, finalGoal);
+            if (detour && detour.length > 0) {
+              state.path = detour;
+              state.yieldTicks = 0;
+              break; // retry on next tick with the detour path
+            }
+          }
+          // Nudge idle friendly blocker (for any movement type, not just gather)
+          if (state.yieldTicks === 0 && blocker && blocker.faction === unit.faction) {
+            this._nudgeUnit(blocker);
+          }
+        } else if (blocker && !isFinalTile) {
+          // Moving blocker: detect head-on swap (blocker's next tile is our current tile).
+          // Without intervention, both units sit in the moving-blocker wait and re-path to
+          // the same terrain-only route on deadlock, causing a permanent stall.
+          const cur = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+          const blockerNext =
+            (blocker.state.kind === "moving" || blocker.state.kind === "patrolling" ||
+             blocker.state.kind === "gatherMove" || blocker.state.kind === "dropoffMove" ||
+             blocker.state.kind === "buildMove" || blocker.state.kind === "attacking" ||
+             blocker.state.kind === "attachMove" || blocker.state.kind === "following" ||
+             blocker.state.kind === "garrisonMove" || blocker.state.kind === "enterPlatformMove")
+              ? blocker.state.path[0]
+              : undefined;
+          const headOn = blockerNext && blockerNext.x === cur.x && blockerNext.y === cur.y;
+          if (headOn && state.yieldTicks === 0) {
+            // Try to route around the blocker's current tile immediately.
+            const blockerTile = { x: Math.round(blocker.position.x), y: Math.round(blocker.position.y) };
+            const finalGoal = state.path[state.path.length - 1]!;
+            const wasBlocked = this.grid.isBlocked(blockerTile.x, blockerTile.y);
+            if (!wasBlocked) this.grid.blockTile(blockerTile.x, blockerTile.y);
+            const detour = this._findPathAroundIdleUnits(unit, cur, finalGoal);
+            if (!wasBlocked) this.grid.unblockTile(blockerTile.x, blockerTile.y);
+            if (detour && detour.length > 0 &&
+                !(detour[0]!.x === next.x && detour[0]!.y === next.y)) {
+              state.path = detour;
+              state.yieldTicks = 0;
+              break;
+            }
+          }
+        }
+
         state.yieldTicks++;
-        if (state.yieldTicks >= REPLAN_THRESHOLD) {
-          this._replanUnit(unit);
+        const threshold = blockerMoving ? DEADLOCK_THRESHOLD : REPLAN_THRESHOLD;
+        if (state.yieldTicks >= threshold) {
+          if (isApproach && isFinalTile) {
+            // Proximity arrival: close enough — trigger arrival and let handler resolve occupancy
+            state.path.shift();
+            this._onUnitArrived(unit);
+          } else {
+            // If a moving same-layer unit is still in the way, route around its current tile.
+            const avoid = blockerMoving && blocker
+              ? { x: Math.round(blocker.position.x), y: Math.round(blocker.position.y) }
+              : null;
+            this._replanUnit(unit, avoid);
+            // If replan still left us blocked on the same next tile (narrow corridor),
+            // nudge ourselves aside so the other unit can pass.
+            const ns = unit.state;
+            const stillStuck = (ns.kind === state.kind) &&
+              "path" in ns && Array.isArray(ns.path) && ns.path[0] &&
+              ns.path[0].x === next.x && ns.path[0].y === next.y;
+            if (stillStuck) this._nudgeUnit(unit);
+          }
           return;
         }
         break;
@@ -814,7 +1303,16 @@ export class GameEngine {
     }
 
     if (state.path.length === 0) {
-      this._onUnitArrived(unit);
+      // Approach moves with yieldTicks > 0 are in a retry-wait after a failed replan
+      const isApproach = state.kind === "gatherMove" || state.kind === "dropoffMove" ||
+        state.kind === "garrisonMove" || state.kind === "attachMove" || state.kind === "buildMove" ||
+        state.kind === "enterPlatformMove";
+      if (isApproach && state.yieldTicks > 0) {
+        state.yieldTicks--;
+        if (state.yieldTicks === 0) this._replanUnit(unit);
+      } else {
+        this._onUnitArrived(unit);
+      }
     }
   }
 
@@ -827,16 +1325,20 @@ export class GameEngine {
 
       case "gatherMove": {
         const { depositId } = state;
+        const deposit = this.deposits.find((d) => d.id === depositId);
         const existing = this.depositOccupants.get(depositId);
         if (existing && existing !== unit.id) {
           // Deposit occupied — redirect to nearest free same-kind deposit
-          const deposit = this.deposits.find((d) => d.id === depositId);
           const alt = deposit ? this._findNearestUnoccupiedDeposit(deposit.kind, unit.position, GATHER_SEARCH_RADIUS) : null;
-          if (alt) {
-            this.issueGatherOrder(unit.id, alt.id);
-          } else {
-            unit.state = { kind: "idle" };
-          }
+          unit.state = { kind: "idle" };
+          if (alt) this.issueGatherOrder(unit.id, alt.id);
+        } else if (!deposit || deposit.quantity <= 0) {
+          // Deposit exhausted while en route — find alternative
+          if (deposit) this._clearDepositTerrain(deposit);
+          const kind = deposit?.kind ?? "wood";
+          const alt = this._findNearestUnoccupiedDeposit(kind, unit.position, GATHER_SEARCH_RADIUS);
+          unit.state = { kind: "idle" };
+          if (alt) this.issueGatherOrder(unit.id, alt.id);
         } else {
           this.depositOccupants.set(depositId, unit.id);
           unit.state = { kind: "gathering", depositId };
@@ -876,7 +1378,66 @@ export class GameEngine {
         platform.attachedCoreId = unit.id;
         break;
       }
+
+      case "following":
+        // Path exhausted — _processFollowing will replan next tick if still out of range
+        break;
+
+      case "garrisonMove": {
+        const tower = this.entities.get(state.buildingId) as BuildingEntity | undefined;
+        if (!tower || tower.typeKey !== "wizardTower" || !tower.isOperational || tower.garrisonedUnitId) {
+          unit.state = { kind: "idle" }; break;
+        }
+        unit.position = { ...tower.position };
+        unit.garrisonedBuildingId = tower.id;
+        unit.state = { kind: "garrisoned", buildingId: tower.id };
+        tower.garrisonedUnitId = unit.id;
+        // Unit's HP rolls into the tower while garrisoned: tower absorbs damage on the
+        // unit's behalf. The unit's own HP becomes moot until it exits.
+        this._absorbIntoBuilding(unit, tower);
+        break;
+      }
+
+      case "enterPlatformMove": {
+        const platform = this.entities.get(state.platformId) as BuildingEntity | undefined;
+        const cap =
+          robotBuildingStats[platform?.typeKey ?? ""]?.occupantCapacity ?? 1;
+        if (
+          !platform ||
+          platform.typeKey !== "immobileCombatPlatform" ||
+          !platform.isOperational ||
+          platform.occupantIds.size >= cap
+        ) {
+          unit.state = { kind: "idle" };
+          break;
+        }
+        unit.position = { ...platform.position };
+        platform.occupantIds.add(unit.id);
+        unit.state = { kind: "inPlatform", platformId: platform.id };
+        this._absorbIntoBuilding(unit, platform);
+        break;
+      }
     }
+  }
+
+  /** Garrison semantics: the building acts as a pure shell. Damage goes to the
+   *  building's HP; the occupant's HP is frozen until they leave or the building
+   *  is destroyed. No HP manipulation on entry/exit — the unit pops back out with
+   *  whatever HP they walked in with. */
+  private _absorbIntoBuilding(_unit: UnitEntity, _building: BuildingEntity): void {
+    // Intentionally empty — shell model. The occupant tracking happens in the
+    // arrival handlers (set `garrisonedUnitId` or add to `occupantIds`); HP is
+    // preserved verbatim on both sides.
+  }
+
+  /** Just clears the bookkeeping; HP is preserved. Kept as a hook for symmetry
+   *  and in case we later want to add per-leave side effects. */
+  private _releaseFromBuilding(
+    _unit: UnitEntity,
+    _building: BuildingEntity,
+    _minUnitHp: number,
+  ): void {
+    // No-op with the shell model.
   }
 
   private _doDropoff(unit: UnitEntity): void {
@@ -891,23 +1452,22 @@ export class GameEngine {
 
     // Re-gather from same deposit if available and unoccupied
     const deposit = this.deposits.find((d) => d.id === depositId);
+    const resourceKind = deposit?.kind ?? (unit.state.kind === "dropoffMove" ? unit.state.resource : "wood");
+    unit.state = { kind: "idle" }; // default — overridden below if gather succeeds
     if (deposit && deposit.quantity > 0 && !this.depositOccupants.has(depositId)) {
       this.issueGatherOrder(unit.id, depositId);
     } else if (deposit && deposit.quantity > 0) {
       // Deposit occupied — find nearest unoccupied same-kind within search radius
       const alt = this._findNearestUnoccupiedDeposit(deposit.kind, unit.position, GATHER_SEARCH_RADIUS);
       if (alt) this.issueGatherOrder(unit.id, alt.id);
-      else unit.state = { kind: "idle" };
     } else {
       // Original deposit exhausted — find nearest same-kind within search radius
-      const kind = deposit?.kind ?? unit.state.resource;
-      const alt = this._findNearestUnoccupiedDeposit(kind, unit.position, GATHER_SEARCH_RADIUS);
+      const alt = this._findNearestUnoccupiedDeposit(resourceKind, unit.position, GATHER_SEARCH_RADIUS);
       if (alt) this.issueGatherOrder(unit.id, alt.id);
-      else unit.state = { kind: "idle" };
     }
   }
 
-  private _replanUnit(unit: UnitEntity): void {
+  private _replanUnit(unit: UnitEntity, avoidTile: Vec2 | null = null): void {
     const state = unit.state;
     if (
       state.kind !== "moving" &&
@@ -916,7 +1476,9 @@ export class GameEngine {
       state.kind !== "dropoffMove" &&
       state.kind !== "buildMove" &&
       state.kind !== "attacking" &&
-      state.kind !== "attachMove"
+      state.kind !== "attachMove" &&
+      state.kind !== "garrisonMove" &&
+      state.kind !== "enterPlatformMove"
     ) return;
 
     let targetPosition: Vec2;
@@ -924,7 +1486,14 @@ export class GameEngine {
       targetPosition = state.targetPosition;
     } else if (state.kind === "gatherMove") {
       const deposit = this.deposits.find((d) => d.id === state.depositId);
-      if (!deposit) { unit.state = { kind: "idle" }; return; }
+      if (!deposit || deposit.quantity <= 0) {
+        if (deposit) this._clearDepositTerrain(deposit);
+        const kind = deposit?.kind ?? "wood";
+        const alt = this._findNearestUnoccupiedDeposit(kind, unit.position, GATHER_SEARCH_RADIUS);
+        unit.state = { kind: "idle" };
+        if (alt) this.issueGatherOrder(unit.id, alt.id);
+        return;
+      }
       targetPosition = deposit.position;
     } else if (state.kind === "dropoffMove") {
       const building = this.entities.get(state.dropoffId);
@@ -941,7 +1510,7 @@ export class GameEngine {
     } else if (state.kind === "attacking") {
       const target = this.entities.get(state.targetId);
       if (!target) { unit.state = { kind: "idle" }; return; }
-      const goal = this._nearestPassable({ x: Math.floor(target.position.x), y: Math.floor(target.position.y) });
+      const goal = this._nearestGoalForUnit(unit, { x: Math.floor(target.position.x), y: Math.floor(target.position.y) });
       if (!goal) { unit.state = { kind: "idle" }; return; }
       targetPosition = goal;
     } else if (state.kind === "attachMove") {
@@ -950,27 +1519,54 @@ export class GameEngine {
       const goal = this._nearestAttachTile(platform.position, unit.position);
       if (!goal) { unit.state = { kind: "idle" }; return; }
       targetPosition = goal;
+    } else if (state.kind === "garrisonMove") {
+      const tower = this.entities.get(state.buildingId) as BuildingEntity | undefined;
+      if (!tower || tower.typeKey !== "wizardTower" || !tower.isOperational || tower.garrisonedUnitId) {
+        unit.state = { kind: "idle" }; return;
+      }
+      const goal = this._nearestAttachTile(tower.position, unit.position);
+      if (!goal) { unit.state = { kind: "idle" }; return; }
+      targetPosition = goal;
+    } else if (state.kind === "enterPlatformMove") {
+      const platform = this.entities.get(state.platformId) as BuildingEntity | undefined;
+      const cap = robotBuildingStats[platform?.typeKey ?? ""]?.occupantCapacity ?? 1;
+      if (
+        !platform ||
+        platform.typeKey !== "immobileCombatPlatform" ||
+        !platform.isOperational ||
+        platform.occupantIds.size >= cap
+      ) {
+        unit.state = { kind: "idle" }; return;
+      }
+      const goal = this._nearestAttachTile(platform.position, unit.position);
+      if (!goal) { unit.state = { kind: "idle" }; return; }
+      targetPosition = goal;
     } else {
       targetPosition = state.heading === "toB" ? state.pointB : state.pointA;
     }
 
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
+    const goal = this._nearestGoalForUnit(unit, targetPosition);
+    // For gather/dropoff, fall back to terrain-only path if unit-aware pathfinding fails —
+    const isApproach = state.kind === "gatherMove" || state.kind === "dropoffMove" ||
+      state.kind === "garrisonMove" || state.kind === "attachMove" || state.kind === "buildMove" ||
+      state.kind === "enterPlatformMove";
 
-    const blockedByUnits: Vec2[] = [];
-    for (const u of this.entities.units()) {
-      if (u.id === unit.id) continue;
-      const tx = Math.round(u.position.x);
-      const ty = Math.round(u.position.y);
-      if (!this.grid.isBlocked(tx, ty)) {
-        this.grid.blockTile(tx, ty);
-        blockedByUnits.push({ x: tx, y: ty });
-      }
+    // avoidTile: temporarily treat the given tile as blocked so we route around it.
+    // Used by the block-resolution code to escape head-on collisions with a moving unit.
+    let tempBlocked = false;
+    if (
+      avoidTile &&
+      !unit.isFlying &&
+      this.grid.inBounds(avoidTile.x, avoidTile.y) &&
+      !this.grid.isBlocked(avoidTile.x, avoidTile.y) &&
+      !(avoidTile.x === goal?.x && avoidTile.y === goal?.y)
+    ) {
+      this.grid.blockTile(avoidTile.x, avoidTile.y);
+      tempBlocked = true;
     }
-
-    const goal = this._nearestPassable(targetPosition);
-    const path = goal ? findPath(this.grid, start, goal) : null;
-
-    for (const pos of blockedByUnits) this.grid.unblockTile(pos.x, pos.y);
+    const path = goal ? this._findPathForUnit(unit, start, goal) : null;
+    if (tempBlocked && avoidTile) this.grid.unblockTile(avoidTile.x, avoidTile.y);
 
     if (path !== null && path.length > 0) {
       if (state.kind === "moving") {
@@ -979,10 +1575,15 @@ export class GameEngine {
         unit.state = { ...state, path, yieldTicks: 0 };
       }
     } else if (path !== null) {
-      // Empty path — unit is already at the target tile after rounding; trigger arrival.
+      // Empty path — already at goal; trigger arrival.
       this._onUnitArrived(unit);
     } else {
-      unit.state = { kind: "idle" };
+      // No terrain path found — approach moves retry; others give up.
+      if (isApproach) {
+        unit.state = { ...state, path: [], yieldTicks: GATHER_RETRY_DELAY_TICKS };
+      } else {
+        unit.state = { kind: "idle" };
+      }
     }
   }
 
@@ -992,7 +1593,7 @@ export class GameEngine {
     const newHeading = heading === "toB" ? "toA" : "toB";
     const target = newHeading === "toB" ? pointB : pointA;
     const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
-    const path = findPath(this.grid, start, target);
+    const path = this._findPathForUnit(unit, start, target);
     if (path && path.length > 0) {
       unit.state = { kind: "patrolling", pointA, pointB, path, heading: newHeading, yieldTicks: 0 };
     } else {
@@ -1012,6 +1613,7 @@ export class GameEngine {
 
       if (!deposit || deposit.quantity <= 0) {
         this.depositOccupants.delete(depositId);
+        if (deposit) this._clearDepositTerrain(deposit);
         if (unit.carrying && unit.carrying.amount > 0) {
           // Still carrying something — drop it off, then auto-find next deposit
           this._sendToDropoff(unit, depositId);
@@ -1019,8 +1621,8 @@ export class GameEngine {
           // Nothing carrying — find next same-kind deposit within search radius
           const kind = deposit?.kind ?? "wood";
           const alt = this._findNearestUnoccupiedDeposit(kind, unit.position, GATHER_SEARCH_RADIUS);
+          unit.state = { kind: "idle" };
           if (alt) this.issueGatherOrder(unit.id, alt.id);
-          else unit.state = { kind: "idle" };
         }
         continue;
       }
@@ -1035,9 +1637,9 @@ export class GameEngine {
       deposit.quantity -= harvest;
       unit.carrying = { resource: deposit.kind, amount: carrying + harvest };
 
-      // Clear terrain when wood deposit exhausted (tile becomes open/passable)
-      if (deposit.quantity <= 0 && deposit.kind === "wood") {
-        this.grid.setTerrain(deposit.position.x, deposit.position.y, "open");
+      // Clear terrain when deposit exhausted (tile becomes open/passable for both wood and water)
+      if (deposit.quantity <= 0) {
+        this._clearDepositTerrain(deposit);
       }
 
       // Full load or deposit just exhausted → head to dropoff
@@ -1106,6 +1708,12 @@ export class GameEngine {
     return best;
   }
 
+  /** Change tile to open when a deposit is exhausted so the terrain clears visually. Idempotent. */
+  private _clearDepositTerrain(deposit: ResourceDeposit): void {
+    if (deposit.quantity > 0) return;
+    this.grid.setTerrain(deposit.position.x, deposit.position.y, "open");
+  }
+
   private _findNearestUnoccupiedDeposit(
     kind: "wood" | "water",
     fromPos: Vec2,
@@ -1130,11 +1738,16 @@ export class GameEngine {
     return available[0]!;
   }
 
-  /** Release deposit occupancy if the unit is currently gathering or in dropoffMove. */
+  /** Release deposit occupancy and garrison state before issuing a new order. */
   private _releaseDepositOccupancy(unit: UnitEntity): void {
     if (unit.state.kind === "gathering" || unit.state.kind === "gatherMove") {
       const occupant = this.depositOccupants.get(unit.state.depositId);
       if (occupant === unit.id) this.depositOccupants.delete(unit.state.depositId);
+    }
+    if (unit.garrisonedBuildingId) {
+      const tower = this.entities.get(unit.garrisonedBuildingId) as BuildingEntity | undefined;
+      if (tower) tower.garrisonedUnitId = null;
+      unit.garrisonedBuildingId = null;
     }
   }
 
@@ -1166,11 +1779,19 @@ export class GameEngine {
   }
 
   private _spawnProducedUnit(building: BuildingEntity, unitTypeKey: string): void {
-    let stats: { maxHp: number; damage: number; range: number; speed: number; charisma: number; armor: number; capacity: number } | null = null;
+    let stats: { maxHp: number; damage: number; attackRange: number; sightRange: number; speed: number; charisma: number; armor: number; capacity: number } | null = null;
+    let isFlying = false;
+    let canAttackAir = false;
+    let cannotBeConverted = false;
 
     if (building.faction === "wizards") {
       const ws = wizardUnitStats[unitTypeKey];
-      if (ws) stats = { maxHp: ws.hp, damage: ws.damage, range: ws.range, speed: ws.speed, charisma: ws.charisma, armor: ws.armor, capacity: ws.capacity };
+      if (ws) {
+        stats = { maxHp: ws.hp, damage: ws.damage, attackRange: ws.attackRange, sightRange: ws.sightRange, speed: ws.speed, charisma: ws.charisma, armor: ws.armor, capacity: ws.capacity };
+        isFlying = ws.flying ?? false;
+        canAttackAir = ws.canAttackAir ?? false;
+        cannotBeConverted = ws.cannotBeConverted ?? false;
+      }
     } else {
       const rs = robotUnitStats[unitTypeKey];
       if (rs) {
@@ -1178,12 +1799,16 @@ export class GameEngine {
         stats = {
           maxHp: metalUnlocked ? rs.hpMetal : rs.hpWood,
           damage: rs.damage,
-          range: rs.range,
+          attackRange: rs.attackRange,
+          sightRange: rs.sightRange,
           speed: rs.speed,
           charisma: rs.charisma,
           armor: metalUnlocked ? rs.armorMetal : rs.armorWood,
           capacity: rs.capacity,
         };
+        isFlying = rs.flying ?? false;
+        canAttackAir = rs.canAttackAir ?? false;
+        cannotBeConverted = rs.cannotBeConverted ?? false;
       }
     }
 
@@ -1197,6 +1822,9 @@ export class GameEngine {
       typeKey: unitTypeKey,
       position: spawnPos,
       stats,
+      isFlying,
+      canAttackAir,
+      cannotBeConverted,
     });
     if (building.faction === "robots") {
       const metalUnlocked = this._completedResearch.get("robots")?.has("woodToMetal") ?? false;
@@ -1220,7 +1848,7 @@ export class GameEngine {
           if (!onPerimeter) continue;
           const tx = bx + dx;
           const ty = by + dy;
-          if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, "")) {
+          if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, "", false)) {
             return { x: tx, y: ty };
           }
         }
@@ -1245,26 +1873,49 @@ export class GameEngine {
 
   private _processAttacks(): void {
     for (const unit of this.entities.units()) {
+      // Skip phantom attackers: `entities.units()` returns a snapshot copy, so a unit
+      // that died earlier in this pass would otherwise keep swinging from the grave.
+      if (unit.stats.hp <= 0 || !this.entities.has(unit.id)) continue;
       if (unit.state.kind !== "attacking") continue;
       const state = unit.state;
 
       if (unit.attackCooldownTicks > 0) unit.attackCooldownTicks--;
 
       const target = this.entities.get(state.targetId);
-      if (!target) { unit.state = { kind: "idle" }; continue; }
+      if (!target || target.stats.hp <= 0) { unit.state = { kind: "idle" }; continue; }
+      if (target.kind === "unit") {
+        const tUnit = target as UnitEntity;
+        if (tUnit.isFlying && !unit.canAttackAir) { unit.state = { kind: "idle" }; continue; }
+        // If the target ducked into a shell/tower/platform mid-chase, give up — the
+        // containing building is the only valid damage sink now.
+        if (tUnit.state.kind === "platformShell" ||
+            tUnit.state.kind === "garrisoned" ||
+            tUnit.state.kind === "inPlatform") {
+          unit.state = { kind: "idle" }; continue;
+        }
+      }
 
       const dx = target.position.x - unit.position.x;
       const dy = target.position.y - unit.position.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist > unit.stats.range) {
+      if (dist > unit.stats.attackRange) {
         // Not in range — compute chase path if not already chasing
         if (state.path.length === 0) {
           const start = { x: Math.round(unit.position.x), y: Math.round(unit.position.y) };
-          const goal = this._nearestPassable({ x: Math.floor(target.position.x), y: Math.floor(target.position.y) });
-          const path = goal ? findPath(this.grid, start, goal) : null;
-          state.path = path ?? [];
-          state.yieldTicks = 0;
+          const goal = this._nearestGoalForUnit(unit, { x: Math.floor(target.position.x), y: Math.floor(target.position.y) });
+          if (goal) {
+            // Exclude co-attackers from obstacle set — they're heading out of the way too
+            const coAttackers = new Set<string>();
+            for (const u of this.entities.units()) {
+              if (u.id !== unit.id && u.state.kind === "attacking" && u.state.targetId === state.targetId)
+                coAttackers.add(u.id);
+            }
+            let path = this._findPathForUnit(unit, start, goal, coAttackers);
+            if (!path) path = findPath(this.grid, start, goal); // terrain-only fallback
+            state.path = path ?? [];
+            state.yieldTicks = 0;
+          }
         }
         continue;
       }
@@ -1273,8 +1924,20 @@ export class GameEngine {
       state.path = [];
       if (unit.attackCooldownTicks > 0) continue;
 
-      const dmg = Math.max(0, unit.stats.damage - target.stats.armor);
+      let dmg = Math.max(0, unit.stats.damage - target.stats.armor);
+      if (target.kind === "unit" && (target as UnitEntity).manaShielded)
+        dmg = Math.floor(dmg * (1 - spellCosts.manaShieldDamageReduction));
+      if (unit.damageBonusMultiplier !== 1.0)
+        dmg = Math.round(dmg * unit.damageBonusMultiplier);
       target.stats.hp -= dmg;
+
+      this._attackEvents.push({
+        attackerId: unit.id,
+        targetId: target.id,
+        attackerPos: { ...unit.position },
+        targetPos: { ...target.position },
+        ranged: unit.stats.attackRange > 1,
+      });
 
       const statConfig = unit.faction === "wizards"
         ? wizardUnitStats[unit.typeKey]
@@ -1290,15 +1953,21 @@ export class GameEngine {
   private _processAutoAggro(tick: number): void {
     if (tick % 10 !== 0) return;
     for (const unit of this.entities.units()) {
+      if (unit.stats.hp <= 0 || !this.entities.has(unit.id)) continue;
       if (unit.state.kind !== "idle") continue;
       if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) continue; // unattached platforms don't auto-aggro
       for (const entity of this.entities.all()) {
         if (entity.faction === unit.faction) continue;
-        if (entity.kind === "unit" && (entity as UnitEntity).state.kind === "platformShell") continue;
+        if (entity.stats.hp <= 0) continue;
+        if (entity.kind === "unit") {
+          const eu = entity as UnitEntity;
+          if (eu.state.kind === "platformShell" || eu.state.kind === "garrisoned" || eu.state.kind === "inPlatform") continue;
+          if (eu.isFlying && !unit.canAttackAir) continue;
+        }
         const dx = entity.position.x - unit.position.x;
         const dy = entity.position.y - unit.position.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist <= unit.stats.range) {
+        if (dist <= unit.stats.attackRange) {
           unit.state = { kind: "attacking", targetId: entity.id, path: [], yieldTicks: 0 };
           break;
         }
@@ -1306,10 +1975,69 @@ export class GameEngine {
     }
   }
 
+  /** Safety net: sweep any entity whose HP hit 0 without triggering `_handleEntityDeath`
+   *  through a normal damage path. Runs every tick right before `onTick` so the
+   *  snapshot the UI + AI see is always free of corpses. */
+  private _cleanupDeadEntities(): void {
+    // Snapshot ids first — `_handleEntityDeath` mutates the map.
+    const deadIds: string[] = [];
+    for (const e of this.entities.all()) {
+      if (e.stats.hp <= 0) deadIds.push(e.id);
+    }
+    for (const id of deadIds) {
+      const e = this.entities.get(id);
+      if (e) this._handleEntityDeath(e);
+    }
+  }
+
   private _handleEntityDeath(entity: Entity, killerId?: string): void {
+    // Idempotency guard — multiple damage paths can land on the same tick, or a unit
+    // can phantom-attack a target that was already killed earlier in this pass. Without
+    // this check, the side effects (XP, ejection, alert) fire twice.
+    if (!this.entities.has(entity.id)) return;
+
     if (entity.kind === "unit") {
       const unit = this.entities.get(entity.id) as UnitEntity | undefined;
-      if (unit) this._releaseDepositOccupancy(unit);
+      if (unit) {
+        this._releaseDepositOccupancy(unit);
+        // If this unit was inside an Immobile Combat Platform, remove from occupants.
+        if (unit.state.kind === "inPlatform") {
+          const platform = this.entities.get(unit.state.platformId) as BuildingEntity | undefined;
+          platform?.occupantIds.delete(unit.id);
+        }
+        // If this is a robot platform with an attached Core, the Core is tucked inside
+        // as a `platformShell`. Without cleanup it would linger in the entity map —
+        // still counted toward population, still reachable by id — after its host
+        // platform is gone. Eject the Core to an adjacent tile in `idle` state so it
+        // survives with its XP intact (the Core was insulated from damage while the
+        // platform absorbed hits).
+        if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && unit.attachedCoreId) {
+          const coreEntity = this.entities.get(unit.attachedCoreId);
+          if (coreEntity && coreEntity.kind === "unit") {
+            const core = coreEntity as UnitEntity;
+            const px = Math.round(unit.position.x);
+            const py = Math.round(unit.position.y);
+            const dirs = [
+              { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+              { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 },
+            ];
+            let ejectPos: Vec2 = { x: px, y: py };
+            for (const d of dirs) {
+              const tx = px + d.x;
+              const ty = py + d.y;
+              if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, core.id, false)) {
+                ejectPos = { x: tx, y: ty };
+                break;
+              }
+            }
+            core.position = ejectPos;
+            core.attachedPlatformId = null;
+            core.attachedPlatformTypeKey = null;
+            core.state = { kind: "idle" };
+            unit.attachedCoreId = null;
+          }
+        }
+      }
       if (killerId) this.giveXp(killerId, xpRates.killEnemy);
       this.entities.remove(entity.id);
       this.onAlert?.(`${entity.typeKey} destroyed`);
@@ -1321,7 +2049,20 @@ export class GameEngine {
       }
     } else if (entity.kind === "building") {
       const building = this.entities.get(entity.id) as BuildingEntity | undefined;
-      if (building) this._unblockBuildingTiles(building);
+      if (building) {
+        this._unblockBuildingTiles(building);
+        // Spec: when the building is destroyed, the occupying unit exits alive.
+        // Pass minUnitHp = 1 so the proportional-HP calculation can't drop them
+        // to zero (the building HP is 0 here, so without the floor they'd die too).
+        if (building.garrisonedUnitId) {
+          this.issueLeaveGarrisonOrder(building.garrisonedUnitId, 1);
+        }
+        if (building.occupantIds.size > 0) {
+          for (const occupantId of [...building.occupantIds]) {
+            this.issueLeavePlatformOrder(occupantId, 1);
+          }
+        }
+      }
       this.entities.remove(entity.id);
       this.onAlert?.(`${entity.typeKey} destroyed`);
     }
@@ -1382,6 +2123,122 @@ export class GameEngine {
     if (!this._completedResearch.get("wizards")?.has("manaShield")) return;
     if (!unit.manaShielded && this.resources.wizards.mana <= 0) return;
     unit.manaShielded = !unit.manaShielded;
+  }
+
+  issueIceBlastOrder(casterId: string, targetId: string): void {
+    const caster = this.entities.get(casterId) as UnitEntity | undefined;
+    if (!caster || caster.kind !== "unit" || caster.typeKey !== "evoker") return;
+    if (!this._completedResearch.get("wizards")?.has("iceBlast")) return;
+    if (this.resources.wizards.mana < spellCosts.iceBlastMana) return;
+    const target = this.entities.get(targetId);
+    if (!target || target.faction === "wizards") return;
+    const dx = target.position.x - caster.position.x;
+    const dy = target.position.y - caster.position.y;
+    if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
+
+    this.resources.wizards.mana -= spellCosts.iceBlastMana;
+    this._spellEvents.push({ kind: "iceBlast", casterId, casterPos: { ...caster.position }, targetId, targetPos: { ...target.position } });
+    const t = target as UnitEntity;
+    if (t.slowTicksRemaining === 0) t.baseSpeed = t.stats.speed;
+    t.stats.speed = t.baseSpeed * (1 - spellEffects.iceBlast.speedReductionPct / 100);
+    t.slowTicksRemaining = spellEffects.iceBlast.slowDurationTicks;
+  }
+
+  issueFieryExplosionOrder(casterId: string, targetPos: Vec2): void {
+    const caster = this.entities.get(casterId) as UnitEntity | undefined;
+    if (!caster || caster.kind !== "unit" || caster.typeKey !== "evoker") return;
+    if (!this._completedResearch.get("wizards")?.has("fieryExplosion")) return;
+    if (this.resources.wizards.mana < spellCosts.fieryExplosionMana) return;
+    const dx = targetPos.x - caster.position.x;
+    const dy = targetPos.y - caster.position.y;
+    if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
+
+    this.resources.wizards.mana -= spellCosts.fieryExplosionMana;
+    this._spellEvents.push({ kind: "fieryExplosion", casterId, casterPos: { ...caster.position }, targetPos: { ...targetPos } });
+    const radiusSq = spellEffects.fieryExplosion.radiusTiles ** 2;
+    for (const entity of [...this.entities.all()]) {
+      if (entity.faction === "wizards") continue;
+      const ex = entity.position.x - targetPos.x;
+      const ey = entity.position.y - targetPos.y;
+      if (ex * ex + ey * ey > radiusSq) continue;
+      const dmg = Math.max(0, spellEffects.fieryExplosion.damage - entity.stats.armor);
+      entity.stats.hp -= dmg;
+      if (entity.stats.hp <= 0) this._handleEntityDeath(entity, casterId);
+    }
+  }
+
+  issueEnlargeOrder(casterId: string, targetId: string): void {
+    const caster = this.entities.get(casterId) as UnitEntity | undefined;
+    if (!caster || caster.kind !== "unit" || caster.typeKey !== "enchantress") return;
+    if (!this._completedResearch.get("wizards")?.has("strengthenAlly")) return;
+    if (this.resources.wizards.mana < spellCosts.enlargeMana) return;
+    const target = this.entities.get(targetId);
+    if (!target || target.kind !== "unit" || target.faction !== "wizards") return;
+    const dx = target.position.x - caster.position.x;
+    const dy = target.position.y - caster.position.y;
+    if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
+
+    this.resources.wizards.mana -= spellCosts.enlargeMana;
+    this._spellEvents.push({ kind: "enlarge", casterId, casterPos: { ...caster.position }, targetId, targetPos: { ...target.position } });
+    const t = target as UnitEntity;
+    t.damageBonusMultiplier = 1 + spellEffects.enlarge.damageBonusPct / 100;
+    t.damageBonusTicks = spellEffects.enlarge.durationTicks;
+  }
+
+  issueReduceOrder(casterId: string, targetId: string): void {
+    const caster = this.entities.get(casterId) as UnitEntity | undefined;
+    if (!caster || caster.kind !== "unit" || caster.typeKey !== "enchantress") return;
+    if (!this._completedResearch.get("wizards")?.has("weakenFoe")) return;
+    if (this.resources.wizards.mana < spellCosts.reduceMana) return;
+    const target = this.entities.get(targetId);
+    if (!target || target.faction === "wizards") return;
+    const dx = target.position.x - caster.position.x;
+    const dy = target.position.y - caster.position.y;
+    if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
+
+    this.resources.wizards.mana -= spellCosts.reduceMana;
+    this._spellEvents.push({ kind: "reduce", casterId, casterPos: { ...caster.position }, targetId, targetPos: { ...target.position } });
+    const t = target as UnitEntity;
+    t.damageBonusMultiplier = 1 - spellEffects.reduce.damagePenaltyPct / 100;
+    t.damageBonusTicks = spellEffects.reduce.durationTicks;
+  }
+
+  private _processSlows(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.slowTicksRemaining <= 0) continue;
+      unit.slowTicksRemaining--;
+      if (unit.slowTicksRemaining === 0) unit.stats.speed = unit.baseSpeed;
+    }
+  }
+
+  private _processBuffExpiry(): void {
+    for (const unit of this.entities.units()) {
+      if (unit.damageBonusTicks <= 0) continue;
+      unit.damageBonusTicks--;
+      if (unit.damageBonusTicks === 0) unit.damageBonusMultiplier = 1.0;
+    }
+  }
+
+  private _processClericHealing(tick: number): void {
+    if (tick % clericConfig.healIntervalTicks !== 0) return;
+    const clerics = this.entities.unitsByFaction("wizards").filter(
+      (u) => u.typeKey === "cleric" && u.state.kind !== "platformShell" && u.stats.hp > 0,
+    );
+    if (clerics.length === 0) return;
+    const radiusSq = clericConfig.healRadiusTiles ** 2;
+    for (const cleric of clerics) {
+      for (const unit of this.entities.unitsByFaction("wizards")) {
+        if (unit.id === cleric.id) continue;
+        if (unit.stats.hp <= 0 || unit.stats.hp >= unit.stats.maxHp) continue;
+        const dx = unit.position.x - cleric.position.x;
+        const dy = unit.position.y - cleric.position.y;
+        if (dx * dx + dy * dy > radiusSq) continue;
+        const before = unit.stats.hp;
+        unit.stats.hp = Math.min(unit.stats.maxHp, unit.stats.hp + clericConfig.healPerInterval);
+        const healed = unit.stats.hp - before;
+        if (healed > 0) this.giveXp(cleric.id, healed * clericConfig.healXpPerHp);
+      }
+    }
   }
 
   private _processAmphitheatreXp(tick: number): void {
@@ -1446,6 +2303,61 @@ export class GameEngine {
     return null;
   }
 
+  /** Replan around stationary (idle/gathering/constructing) ground units to find a detour.
+   *  The goal tile is never blocked so proximity arrival still works. Returns null if no detour. */
+  private _findPathAroundIdleUnits(unit: UnitEntity, start: Vec2, goal: Vec2): Vec2[] | null {
+    if (unit.isFlying) return findPath(this.grid, start, goal);
+    const STATIONARY = new Set<string>(["idle", "gathering", "constructing", "converting", "garrisoned", "inPlatform", "platformShell"]);
+    const blocked: Vec2[] = [];
+    for (const u of this.entities.units()) {
+      if (u.id === unit.id || u.isFlying) continue;
+      if (!STATIONARY.has(u.state.kind)) continue;
+      const tx = Math.round(u.position.x);
+      const ty = Math.round(u.position.y);
+      if (tx === goal.x && ty === goal.y) continue; // never block goal tile
+      if (!this.grid.isBlocked(tx, ty)) {
+        this.grid.blockTile(tx, ty);
+        blocked.push({ x: tx, y: ty });
+      }
+    }
+    const path = findPath(this.grid, start, goal);
+    for (const pos of blocked) this.grid.unblockTile(pos.x, pos.y);
+    return path;
+  }
+
+  /** Returns the goal tile for a unit: any in-bounds tile for flyers, nearest passable for ground. */
+  private _nearestGoalForUnit(unit: UnitEntity, pos: Vec2): Vec2 | null {
+    if (unit.isFlying) {
+      if (this.grid.inBounds(pos.x, pos.y)) return pos;
+      // Clamp to map bounds
+      const clamped = {
+        x: Math.max(0, Math.min(this.grid.width - 1, pos.x)),
+        y: Math.max(0, Math.min(this.grid.height - 1, pos.y)),
+      };
+      return this.grid.inBounds(clamped.x, clamped.y) ? clamped : null;
+    }
+    return this._nearestPassable(pos);
+  }
+
+  /** Find a path for a unit, respecting flying vs. ground movement rules.
+   *  Ground units use terrain-only pathfinding — runtime yield/nudge handles unit avoidance.
+   *  Flying units still avoid other flyers. excludeIds unused for ground but kept for API compat. */
+  private _findPathForUnit(unit: UnitEntity, start: Vec2, goal: Vec2, excludeIds?: Set<string>): Vec2[] | null {
+    if (unit.isFlying) {
+      const occupied = new Set<string>();
+      for (const u of this.entities.units()) {
+        if (u.id === unit.id || !u.isFlying || u.state.kind === "platformShell") continue;
+        if (excludeIds?.has(u.id)) continue;
+        occupied.add(`${Math.round(u.position.x)},${Math.round(u.position.y)}`);
+      }
+      return findPath(this.grid, start, goal, {
+        isPassable: (x, y) => this.grid.inBounds(x, y) && !occupied.has(`${x},${y}`),
+      });
+    }
+    // Ground: terrain-only. Unit positions are not obstacles for planning.
+    return findPath(this.grid, start, goal);
+  }
+
   private _blockBuildingTiles(building: BuildingEntity): void {
     const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
     const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
@@ -1469,13 +2381,41 @@ export class GameEngine {
     }
   }
 
-  private _tileOccupiedByUnit(x: number, y: number, excludeId: string): boolean {
+  private _tileOccupiedByUnit(x: number, y: number, excludeId: string, isFlying: boolean): boolean {
     for (const u of this.entities.units()) {
       if (u.id === excludeId) continue;
       if (u.state.kind === "platformShell") continue; // passengers don't occupy tiles
+      if (u.isFlying !== isFlying) continue; // flying and ground don't block each other
       if (Math.round(u.position.x) === x && Math.round(u.position.y) === y) return true;
     }
     return false;
+  }
+
+  private _unitAt(x: number, y: number, excludeId: string, isFlying: boolean): UnitEntity | null {
+    for (const u of this.entities.units()) {
+      if (u.id === excludeId) continue;
+      if (u.state.kind === "platformShell") continue;
+      if (u.isFlying !== isFlying) continue;
+      if (Math.round(u.position.x) === x && Math.round(u.position.y) === y) return u;
+    }
+    return null;
+  }
+
+  private _nudgeUnit(unit: UnitEntity): void {
+    const cx = Math.round(unit.position.x);
+    const cy = Math.round(unit.position.y);
+    const dirs = [
+      { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+      { x: 1, y: 1 }, { x: -1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: -1 },
+    ];
+    for (const d of dirs) {
+      const nx = cx + d.x;
+      const ny = cy + d.y;
+      if (this.grid.isPassable(nx, ny) && !this._tileOccupiedByUnit(nx, ny, unit.id, unit.isFlying)) {
+        unit.state = { kind: "moving", targetPosition: { x: nx, y: ny }, path: [{ x: nx, y: ny }], yieldTicks: 0 };
+        return;
+      }
+    }
   }
 
   private _applyLevelUpBonus(unit: UnitEntity): void {
@@ -1503,6 +2443,33 @@ export class GameEngine {
     return result;
   }
 
+  private _computeFactionStats(): Record<Faction, FactionStats> {
+    const mk = (): FactionStats => ({
+      militaryStrength: 0, culture: 0, defense: 0, intelligence: 0, footprint: 0,
+      alignment: { wizards: 0, robots: 0 },
+      openBorders: { wizards: false, robots: false },
+    });
+    const result: Record<Faction, FactionStats> = { wizards: mk(), robots: mk() };
+    for (const unit of this.entities.units()) {
+      if (unit.state.kind === "platformShell") continue;
+      const role = unitRoles[unit.typeKey];
+      const fs = result[unit.faction];
+      fs.intelligence += unit.stats.xp;
+      if (role && MILITARY_ROLES.has(role)) fs.militaryStrength += unit.stats.damage;
+      if (CIVILIAN_UNIT_TYPES.has(unit.typeKey)) fs.culture += unit.stats.xp;
+    }
+    for (const building of this.entities.buildings()) {
+      if (!building.isOperational) continue;
+      const bStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+      const bs = bStats[building.typeKey];
+      if (!bs) continue;
+      const fs = result[building.faction];
+      fs.footprint += bs.footprintTiles * bs.footprintTiles;
+      if (DEFENSIVE_BUILDING_TYPES.has(building.typeKey)) fs.defense += building.stats.hp;
+    }
+    return result;
+  }
+
   private _buildDepositSnapshots(): DepositSnapshot[] {
     return this.deposits
       .filter((d) => d.quantity > 0)
@@ -1520,19 +2487,31 @@ export class GameEngine {
   // ── Fog ───────────────────────────────────────────────────────────────────────
 
   private tick(tick: number, elapsedMs: number): void {
+    this._ai?.tick(tick, this);
     this._syncPassengerPositions();
+    this._syncGarrisonedPositions();
+    this._processFollowing();
     this._processMovement();
     this._processConstruction();
     this._processGathering(tick);
     this._processProduction();
     this._processResearch();
     this._processAttacks();
+    this._processGarrisonedAttacks();
+    this._processImmobileCombatPlatformAttacks();
     this._processAutoAggro(tick);
     this._processAutoCollection(tick);
     this._processMana();
+    this._processSlows();
+    this._processBuffExpiry();
     this._processAmphitheatreXp(tick);
+    this._processClericHealing(tick);
     this._updateFog(tick);
     this.events.flushDeferred();
+
+    // Final safety net — remove any entities whose HP reached 0 this tick without the
+    // damage-site death handler being hit (e.g. buffs expiring on already-fatal wounds).
+    this._cleanupDeadEntities();
 
     this.onTick({
       tick,
@@ -1553,6 +2532,9 @@ export class GameEngine {
         wizards: [...(this._completedResearch.get("wizards") ?? [])],
         robots:  [...(this._completedResearch.get("robots")  ?? [])],
       },
+      attacks: this._attackEvents.splice(0),
+      spells: this._spellEvents.splice(0),
+      factionStats: this._computeFactionStats(),
     });
   }
 
@@ -1570,12 +2552,13 @@ export class GameEngine {
 
     for (const unit of this.entities.unitsByFaction(faction)) {
       if (unit.state.kind === "platformShell") continue; // passengers provide no vision
+      if (unit.state.kind === "inPlatform") continue; // Core vision is rolled into the platform's own vision
       const isUnattachedPlatform = ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId;
       sources.push({
         position: unit.position,
         rangeTiles: isUnattachedPlatform
           ? UNATTACHED_PLATFORM_VISION_TILES
-          : Math.max(unit.stats.range, UNIT_VISION_TILES),
+          : unit.stats.sightRange,
         concealed: unit.concealed,
       });
     }
@@ -1591,7 +2574,11 @@ export class GameEngine {
 
   private _buildingVisionRange(building: BuildingEntity): number {
     const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
-    return factionStats[building.typeKey]?.visionRange ?? 3;
+    const base = factionStats[building.typeKey]?.visionRange ?? 3;
+    if (building.typeKey === "immobileCombatPlatform") {
+      return base + building.occupantIds.size * immobileCombatPlatformConfig.perCoreVision;
+    }
+    return base;
   }
 
   private _updateLastSeen(faction: Faction, fog: FogOfWar, tick: number): void {

@@ -76,6 +76,12 @@
   text-transform: capitalize;
 }
 
+.entityAction {
+  font-size: 10px;
+  color: #60a5fa;
+  margin-top: 2px;
+}
+
 .hpBarWrapper {
   display: flex;
   flex-direction: column;

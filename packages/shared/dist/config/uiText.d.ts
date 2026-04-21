@@ -3,6 +3,10 @@ export declare const uiText: {
         readonly wizards: "Wizards";
         readonly robots: "Robots";
     };
+    readonly factionTaglines: {
+        readonly wizards: "Masters of mana and ancient magic.";
+        readonly robots: "Built for efficiency. Engineered to last.";
+    };
     readonly resources: {
         readonly wood: "Wood";
         readonly water: "Water";

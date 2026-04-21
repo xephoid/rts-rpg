@@ -22,9 +22,17 @@ function posKey(pos: Vec2): string {
   return `${pos.x},${pos.y}`;
 }
 
-/** Find a path from `start` to `goal` on `grid`. Returns array of Vec2 tiles (excluding start). */
-export function findPath(grid: Grid, start: Vec2, goal: Vec2): Vec2[] | null {
-  if (!grid.isPassable(goal.x, goal.y)) return null;
+/** Find a path from `start` to `goal` on `grid`. Returns array of Vec2 tiles (excluding start).
+ *  opts.isPassable overrides the default grid.isPassable check — use for flying units. */
+export function findPath(
+  grid: Grid,
+  start: Vec2,
+  goal: Vec2,
+  opts?: { isPassable?: (x: number, y: number) => boolean },
+): Vec2[] | null {
+  const passable = opts?.isPassable ?? ((x, y) => grid.isPassable(x, y));
+
+  if (!passable(goal.x, goal.y)) return null;
   if (start.x === goal.x && start.y === goal.y) return [];
 
   const open = new MinHeap<Node>((a, b) => a.f - b.f);
@@ -56,12 +64,13 @@ export function findPath(grid: Grid, start: Vec2, goal: Vec2): Vec2[] | null {
     closed.add(currentKey);
 
     for (const neighbour of grid.neighbours8(current.pos.x, current.pos.y)) {
-      if (!grid.isPassable(neighbour.x, neighbour.y)) continue;
+      if (!passable(neighbour.x, neighbour.y)) continue;
       const nKey = posKey(neighbour);
       if (closed.has(nKey)) continue;
 
       const isDiagonal = neighbour.x !== current.pos.x && neighbour.y !== current.pos.y;
-      const moveCost = grid.movementCost(neighbour.x, neighbour.y);
+      // Flying units use uniform cost 1; ground units use terrain cost.
+      const moveCost = opts?.isPassable ? 1 : grid.movementCost(neighbour.x, neighbour.y);
       const stepCost = isDiagonal ? moveCost * Math.SQRT2 : moveCost;
       const tentativeG = current.g + stepCost;
 

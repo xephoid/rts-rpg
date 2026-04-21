@@ -12,15 +12,41 @@ export const manaGen = {
 export const spellCosts = {
     // Initial guess: spells cost 20–60 mana per cast.
     wizardMissiles: 25,
-    iceBlast: 40,
-    fieryExplosion: 55,
+    iceBlastMana: 40,
+    fieryExplosionMana: 55,
+    enlargeMana: 35, // Initial guess
+    reduceMana: 35, // Initial guess
     manaShieldDrainPerSec: 8, // Initial guess: drains continuously while active
+    manaShieldDamageReduction: 0.5, // Initial guess: 50% incoming damage reduction
+};
+export const manaConfig = {
+    // Initial guess: 500 mana cap for the wizard faction.
+    manaMax: 500,
 };
 export const spellEffects = {
     iceBlast: {
         // Initial guess: slows target to 40% speed for 3 seconds.
         slowDurationSec: 3,
+        slowDurationTicks: 180, // 3 * 60 ticks/sec
         speedReductionPct: 60,
     },
+    fieryExplosion: {
+        damage: 60, // Initial guess: high burst damage
+        radiusTiles: 2, // Initial guess: small AoE
+    },
+    enlarge: {
+        damageBonusPct: 50, // Initial guess: +50% damage output
+        durationTicks: 480, // Initial guess: 8 seconds
+    },
+    reduce: {
+        damagePenaltyPct: 50, // Initial guess: -50% damage output
+        durationTicks: 480, // Initial guess: 8 seconds
+    },
+};
+export const clericConfig = {
+    healPerInterval: 2, // Initial guess: 2 HP per heal tick
+    healRadiusTiles: 4, // Initial guess
+    healIntervalTicks: 5, // Initial guess: heals every 5 ticks (~12x/sec)
+    healXpPerHp: 0.5, // Initial guess: XP awarded per HP restored
 };
 //# sourceMappingURL=spellCosts.js.map

@@ -11,8 +11,12 @@ export type BuildingState =
 export class BuildingEntity extends Entity {
   state: BuildingState;
   readonly occupantIds: Set<string> = new Set();
+  /** Set when a wizard unit (Evoker/Archmage) is garrisoned inside this Tower. */
+  garrisonedUnitId: string | null = null;
   /** Queued unit typeKeys — processed FIFO after active production completes. Max 5 total items (active + queue). */
   readonly productionQueue: string[] = [];
+  /** Ticks remaining until this building can attack again (Immobile Combat Platform). */
+  attackCooldownTicks = 0;
 
   constructor(params: {
     id?: string;
@@ -65,6 +69,8 @@ export class BuildingEntity extends Entity {
               totalTicks: this.state.totalTicks,
             }
           : null,
+      garrisonedUnitId: this.garrisonedUnitId ?? undefined,
+      occupantCount: this.occupantIds.size || undefined,
     };
   }
 

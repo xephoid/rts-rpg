@@ -39,16 +39,16 @@ export type ResearchCost = {
 
 export const robotUnitCosts: Record<string, UnitCost> = {
   // Initial guess: light units ~20-40w + 10-20w, 15-20s; heavy ~60-80w + 30-40w, 30-45s
-  core: { wood: 30, water: 15, productionTimeSec: 18 },
-  waterCollectionPlatform: { wood: 25, water: 12, productionTimeSec: 16 },
-  woodChopperPlatform: { wood: 28, water: 14, productionTimeSec: 17 },
-  movableBuildKitPlatform: { wood: 40, water: 20, productionTimeSec: 25 },
-  spinnerPlatform: { wood: 35, water: 18, productionTimeSec: 20 },
-  spitterPlatform: { wood: 50, water: 25, productionTimeSec: 28 },
-  infiltrationPlatform: { wood: 45, water: 22, productionTimeSec: 24 },
-  largeCombatPlatform: { wood: 75, water: 38, productionTimeSec: 42 },
+  core: { wood: 30, water: 15, productionTimeSec: 5 },
+  waterCollectionPlatform: { wood: 25, water: 12, productionTimeSec: 5 },
+  woodChopperPlatform: { wood: 28, water: 14, productionTimeSec: 5 },
+  movableBuildKitPlatform: { wood: 40, water: 20, productionTimeSec: 6 },
+  spinnerPlatform: { wood: 35, water: 18, productionTimeSec: 5 },
+  spitterPlatform: { wood: 50, water: 25, productionTimeSec: 10 },
+  infiltrationPlatform: { wood: 45, water: 22, productionTimeSec: 20 },
+  largeCombatPlatform: { wood: 75, water: 38, productionTimeSec: 30 },
   probePlatform: { wood: 20, water: 10, productionTimeSec: 14 },
-  wallPlatform: { wood: 60, water: 0, productionTimeSec: 30 },
+  wallPlatform: { wood: 60, water: 0, productionTimeSec: 20 },
 };
 
 // ── Wizard unit costs ─────────────────────────────────────────────────────────
@@ -57,11 +57,11 @@ export const wizardUnitCosts: Record<string, UnitCost> = {
   archmage: { wood: 0, water: 80, productionTimeSec: 60 }, // Initial guess: unique hero
   surf: { wood: 20, water: 30, productionTimeSec: 20 },
   subject: { wood: 15, water: 20, productionTimeSec: 15 },
-  evoker: { wood: 30, water: 45, productionTimeSec: 28 },
-  illusionist: { wood: 28, water: 40, productionTimeSec: 26 },
-  dragon: { wood: 0, water: 150, productionTimeSec: 90 }, // Initial guess: apex unit
-  enchantress: { wood: 25, water: 38, productionTimeSec: 24 },
-  cleric: { wood: 20, water: 30, productionTimeSec: 20 },
+  evoker: { wood: 30, water: 45, productionTimeSec: 30 },
+  illusionist: { wood: 28, water: 40, productionTimeSec: 40 },
+  dragon: { wood: 0, water: 150, productionTimeSec: 120 }, // Initial guess: apex unit
+  enchantress: { wood: 25, water: 38, productionTimeSec: 25 },
+  cleric: { wood: 20, water: 30, productionTimeSec: 45 },
 };
 
 // ── Robot building costs ──────────────────────────────────────────────────────
@@ -69,14 +69,14 @@ export const wizardUnitCosts: Record<string, UnitCost> = {
 export const robotBuildingCosts: Record<string, BuildingCost> = {
   home: { wood: 80, water: 0, constructionTimeSec: 45 },
   rechargeStation: { wood: 50, water: 20, constructionTimeSec: 30 },
-  immobileCombatPlatform: { wood: 70, water: 10, constructionTimeSec: 40 },
+  immobileCombatPlatform: { wood: 70, water: 10, constructionTimeSec: 20 },
   waterExtractor: { wood: 40, water: 0, constructionTimeSec: 25 },
   woodStorage: { wood: 30, water: 0, constructionTimeSec: 20 },
-  combatFrameProduction: { wood: 60, water: 15, constructionTimeSec: 35 },
+  combatFrameProduction: { wood: 60, water: 15, constructionTimeSec: 20 },
   combatResearchStation: { wood: 70, water: 20, constructionTimeSec: 40 },
   diplomaticResearchStation: { wood: 60, water: 20, constructionTimeSec: 35 },
   defensiveResearchStation: { wood: 65, water: 15, constructionTimeSec: 38 },
-  thirdSpace: { wood: 50, water: 10, constructionTimeSec: 30 },
+  thirdSpace: { wood: 50, water: 10, constructionTimeSec: 40 },
 };
 
 // ── Wizard building costs ─────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ export const wizardBuildingCosts: Record<string, BuildingCost> = {
   castle: { wood: 120, water: 40, constructionTimeSec: 60 },
   cottage: { wood: 30, water: 10, constructionTimeSec: 20 },
   wall: { wood: 50, water: 0, constructionTimeSec: 25 },
-  wizardTower: { wood: 60, water: 20, constructionTimeSec: 35 },
+  wizardTower: { wood: 60, water: 20, constructionTimeSec: 40 },
   watermill: { wood: 40, water: 0, constructionTimeSec: 25 },
   logCabin: { wood: 35, water: 5, constructionTimeSec: 22 },
   manaReservoir: { wood: 50, water: 30, constructionTimeSec: 32 },

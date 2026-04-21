@@ -5,6 +5,10 @@ export const uiText = {
         wizards: "Wizards",
         robots: "Robots",
     },
+    factionTaglines: {
+        wizards: "Masters of mana and ancient magic.",
+        robots: "Built for efficiency. Engineered to last.",
+    },
     resources: {
         wood: "Wood",
         water: "Water",

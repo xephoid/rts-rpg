@@ -41,6 +41,11 @@ export const BUILDER_UNIT_TYPES = new Set(["surf", "movableBuildKitPlatform"]);
 /** Builder is removed from map when construction completes (single-use). */
 export const SINGLE_USE_BUILDERS = new Set(["movableBuildKitPlatform"]);
 
+/** Buildings whose HP contributes to Defense faction stat. */
+export const DEFENSIVE_BUILDING_TYPES = new Set([
+  "wall", "wizardTower", "immobileCombatPlatform",
+]);
+
 /**
  * Which buildings can accept resources for each resource type.
  * Gatherers only drop off at buildings in this list for the relevant resource.
@@ -129,10 +134,11 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     populationSupport: 8, // Confirmed: spec says +8 per Recharge Station.
   },
   immobileCombatPlatform: {
-    // Initial guess: defensive tower — high HP, long vision.
+    // Initial guess: defensive tower — high HP, long vision. visionRange is the base
+    // (zero Cores); each occupying Core adds immobileCombatPlatformConfig.perCoreVision.
     hp: 350,
-    occupantCapacity: 1,
-    visionRange: 8,
+    occupantCapacity: 3, // Initial guess: up to 3 Cores may enter to boost effectiveness.
+    visionRange: 4, // Initial guess: base sight. Less than a dedicated Watch Tower.
     footprintTiles: 1,
     populationSupport: 0,
   },
@@ -309,4 +315,33 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     footprintTiles: 4,
     populationSupport: 0,
   },
+};
+
+/** Bonuses applied to Evokers and Archmages while garrisoned inside a Wizard Tower. */
+export const wizardTowerConfig = {
+  rangeBonus: 2,   // Initial guess: +2 tiles attack range
+  damageBonus: 10, // Initial guess: +10 damage
+};
+
+/**
+ * Immobile Combat Platform — Core-powered robot turret.
+ *
+ * Shell model: the platform has its own HP; Cores inside don't take damage. Zero
+ * Cores → vision only, no attack. 1+ Cores → platform fires with fixed `baseDamage`
+ * and `baseAttackRange`; each *additional* Core linearly scales the attack rate
+ * (shorter cooldown) and each Core (including the first) adds `perCoreVision` to
+ * sight range.
+ *
+ * Attack interval = `baseAttackIntervalSec / occupants` — so 1 Core fires once per
+ * baseInterval, 2 Cores twice as fast, 3 Cores three times as fast.
+ */
+export const immobileCombatPlatformConfig = {
+  // Initial guess — damage per shot (constant regardless of occupant count).
+  baseDamage: 25,
+  // Initial guess — attack range in tiles (constant regardless of occupant count).
+  baseAttackRange: 5,
+  // Initial guess — base time between shots when exactly 1 Core occupies the platform.
+  baseAttackIntervalSec: 1.5,
+  // Vision each Core adds on top of `visionRange` in `robotBuildingStats`.
+  perCoreVision: 2,
 };

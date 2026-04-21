@@ -51,7 +51,10 @@ export function CommandsPanel() {
   const issueResearch = useUIStore((s) => s.issueResearch);
   const issueCancelResearch = useUIStore((s) => s.issueCancelResearch);
   const issueDetach = useUIStore((s) => s.issueDetach);
+  const issueEjectOccupants = useUIStore((s) => s.issueEjectOccupants);
   const issueManaShieldToggle = useUIStore((s) => s.issueManaShieldToggle);
+  const pendingSpell = useUIStore((s) => s.pendingSpell);
+  const setPendingSpell = useUIStore((s) => s.setPendingSpell);
   const buildMenuOpen = useUIStore((s) => s.buildMenuOpen);
   const setBuildMenuOpen = useUIStore((s) => s.setBuildMenuOpen);
   const setBuildMode = useUIStore((s) => s.setBuildMode);
@@ -105,6 +108,20 @@ export function CommandsPanel() {
       const isProducing = activeFaction === "robots" && totalQueued > 0;
       const completed = gameState.completedResearch?.[activeFaction] ?? [];
 
+      // Dragon Hoard cap counts
+      const hoardCount = gameState.entities.filter(
+        (e) => e.faction === "wizards" && e.kind === "building" && e.typeKey === "dragonHoard" && e.buildingState !== "underConstruction"
+      ).length;
+      const liveAndQueuedDragons =
+        gameState.entities.filter((e) => e.faction === "wizards" && e.kind === "unit" && e.typeKey === "dragon").length +
+        gameState.entities
+          .filter((e) => e.faction === "wizards" && e.kind === "building")
+          .reduce((n, b) => {
+            const active = b.productionProgress?.unitTypeKey === "dragon" ? 1 : 0;
+            const queued = b.productionQueue?.filter((k) => k === "dragon").length ?? 0;
+            return n + active + queued;
+          }, 0);
+
       return (
         <div className={styles.panel}>
           <div className={styles.header}>Commands</div>
@@ -123,7 +140,9 @@ export function CommandsPanel() {
                            e.buildingState !== "underConstruction"
                   )
                 : false;
-              const disabled = queueFull || !canAfford || atPopCap || isLocked || isResearching;
+              const isPlatform = ROBOT_PLATFORM_TYPES_UI.has(typeKey);
+              const dragonCapped = typeKey === "dragon" && liveAndQueuedDragons >= hoardCount;
+              const disabled = queueFull || !canAfford || (!isPlatform && atPopCap) || isLocked || isResearching || dragonCapped;
               const queueCount =
                 (entity.productionProgress?.unitTypeKey === typeKey ? 1 : 0) +
                 (entity.productionQueue?.filter((k) => k === typeKey).length ?? 0);
@@ -133,7 +152,11 @@ export function CommandsPanel() {
                   className={`${styles.cmdBtn}${isLocked ? ` ${styles.cmdBtnLocked}` : ""}`}
                   disabled={disabled}
                   onClick={disabled ? undefined : () => issueProduction(buildingId, typeKey)}
-                  title={isLocked && reqBuilding ? `Requires ${formatTypeKey(reqBuilding)}` : undefined}
+                  title={
+                    isLocked && reqBuilding ? `Requires ${formatTypeKey(reqBuilding)}`
+                    : dragonCapped ? `Dragon Hoard required (${liveAndQueuedDragons}/${hoardCount})`
+                    : undefined
+                  }
                 >
                   <img
                     src={unitPortraitPath(entity.faction, typeKey)}
@@ -216,6 +239,9 @@ export function CommandsPanel() {
     }
 
     // Building with no producible units or research — fallback static commands
+    const hasOccupants = !!entity && entity.faction === activeFaction && (
+      !!entity.garrisonedUnitId || (entity.occupantCount ?? 0) > 0
+    );
     return (
       <div className={styles.panel}>
         <div className={styles.header}>Commands</div>
@@ -233,6 +259,16 @@ export function CommandsPanel() {
               </button>
             );
           })}
+          {hasOccupants && (
+            <button
+              key="Eject"
+              className={styles.cmdBtn}
+              onClick={() => issueEjectOccupants(buildingId)}
+              title="Eject all occupants"
+            >
+              Eject
+            </button>
+          )}
         </div>
       </div>
     );
@@ -390,17 +426,18 @@ export function CommandsPanel() {
               </button>
             );
           }
+          // Leave Tower command moved to building-side (see the building commands
+          // section above) — garrisoned units are invisible and can't be selected.
           return null;
         })()}
         {selection.mode === "single" && selection.kind === "unit" && (() => {
           const entity = gameState?.entities.find((e) => e.id === selection.id);
+          if (!entity || entity.faction !== "wizards") return null;
           const completed = gameState?.completedResearch?.wizards ?? [];
-          if (
-            entity?.faction === "wizards" &&
-            WIZARD_UNIT_TYPES_UI.has(entity.typeKey) &&
-            completed.includes("manaShield")
-          ) {
-            return (
+          const buttons = [];
+
+          if (WIZARD_UNIT_TYPES_UI.has(entity.typeKey) && completed.includes("manaShield")) {
+            buttons.push(
               <button
                 key="ManaShield"
                 className={`${styles.cmdBtn}${entity.manaShielded ? ` ${styles.cmdBtnActive}` : ""}`}
@@ -411,7 +448,66 @@ export function CommandsPanel() {
               </button>
             );
           }
-          return null;
+
+          if (entity.typeKey === "evoker") {
+            if (completed.includes("iceBlast")) {
+              const active = pendingSpell?.kind === "iceBlast" && pendingSpell.casterId === entity.id;
+              buttons.push(
+                <button
+                  key="IceBlast"
+                  className={`${styles.cmdBtn} ${styles.cmdBtnSpell}${active ? ` ${styles.cmdBtnActive}` : ""}`}
+                  onClick={() => setPendingSpell(active ? null : { kind: "iceBlast", casterId: entity.id })}
+                  title="Ice Blast — slow an enemy unit (40 mana)"
+                >
+                  Ice Blast
+                </button>
+              );
+            }
+            if (completed.includes("fieryExplosion")) {
+              const active = pendingSpell?.kind === "fieryExplosion" && pendingSpell.casterId === entity.id;
+              buttons.push(
+                <button
+                  key="FieryExplosion"
+                  className={`${styles.cmdBtn} ${styles.cmdBtnSpell}${active ? ` ${styles.cmdBtnActive}` : ""}`}
+                  onClick={() => setPendingSpell(active ? null : { kind: "fieryExplosion", casterId: entity.id })}
+                  title="Fiery Explosion — AoE damage on target tile (55 mana)"
+                >
+                  Explosion
+                </button>
+              );
+            }
+          }
+
+          if (entity.typeKey === "enchantress") {
+            if (completed.includes("strengthenAlly")) {
+              const active = pendingSpell?.kind === "enlarge" && pendingSpell.casterId === entity.id;
+              buttons.push(
+                <button
+                  key="Enlarge"
+                  className={`${styles.cmdBtn} ${styles.cmdBtnSpell}${active ? ` ${styles.cmdBtnActive}` : ""}`}
+                  onClick={() => setPendingSpell(active ? null : { kind: "enlarge", casterId: entity.id })}
+                  title="Enlarge — ally deals +50% damage for 8s (35 mana)"
+                >
+                  Enlarge
+                </button>
+              );
+            }
+            if (completed.includes("weakenFoe")) {
+              const active = pendingSpell?.kind === "reduce" && pendingSpell.casterId === entity.id;
+              buttons.push(
+                <button
+                  key="Reduce"
+                  className={`${styles.cmdBtn} ${styles.cmdBtnSpell}${active ? ` ${styles.cmdBtnActive}` : ""}`}
+                  onClick={() => setPendingSpell(active ? null : { kind: "reduce", casterId: entity.id })}
+                  title="Reduce — enemy deals -50% damage for 8s (35 mana)"
+                >
+                  Reduce
+                </button>
+              );
+            }
+          }
+
+          return buttons.length > 0 ? <>{buttons}</> : null;
         })()}
       </div>
     </div>

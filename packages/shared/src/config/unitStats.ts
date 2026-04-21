@@ -5,35 +5,60 @@ export type UnitStatBlock = {
   hpWood: number;
   hpMetal: number;
   damage: number;
-  range: number; // tiles
+  attackRange: number; // tiles — how close unit must be to attack
+  sightRange: number;  // tiles — fog-of-war vision radius
   speed: number; // tiles/sec
   charisma: number;
   armorWood: number;
   armorMetal: number;
   capacity: number; // resource carry capacity
   attackIntervalSec: number; // seconds between attacks
+  flying?: boolean; // ignores terrain + building tiles; collides only with other flyers
+  canAttackAir?: boolean; // can target flying units
+  cannotBeConverted?: boolean; // immune to Talk/Convert actions
 };
 
 export type WizardStatBlock = {
   hp: number;
   damage: number;
-  range: number;
+  attackRange: number;
+  sightRange: number;
   speed: number;
   charisma: number;
   armor: number;
   capacity: number;
   attackIntervalSec: number; // seconds between attacks
+  flying?: boolean;
+  canAttackAir?: boolean;
+  cannotBeConverted?: boolean; // immune to Talk/Convert actions
 };
 
 // ── Robot units ──────────────────────────────────────────────────────────────
 
 export const robotUnitStats: Record<string, UnitStatBlock> = {
+  motherboard: {
+    // Initial guess: robot hero unit — unique leader, powerful, high charisma. Cannot be converted.
+    hpWood: 180,
+    hpMetal: 280,
+    damage: 30,
+    attackRange: 3,
+    sightRange: 10,
+    speed: 2.5,
+    charisma: 12,
+    armorWood: 8,
+    armorMetal: 15,
+    capacity: 20,
+    attackIntervalSec: 1.0,
+    cannotBeConverted: true,
+    canAttackAir: true,
+  },
   core: {
     // Initial guess: unarmed civilian — low HP, minimal combat ability.
     hpWood: 60,
     hpMetal: 100,
-    damage: 5,
-    range: 1,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 8, // Initial guess — adjust after playtesting
     speed: 2.5,
     charisma: 10,
     armorWood: 2,
@@ -45,34 +70,37 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     // Initial guess: slow worker — high capacity, low combat.
     hpWood: 80,
     hpMetal: 130,
-    damage: 8,
-    range: 1,
-    speed: 1.5,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 5, // Initial guess
+    speed: 3,
     charisma: 2,
     armorWood: 3,
     armorMetal: 8,
-    capacity: 40,
+    capacity: 15,
     attackIntervalSec: 2.0, // Initial guess
   },
   woodChopperPlatform: {
     // Initial guess: melee worker — moderate HP, good close combat.
     hpWood: 90,
     hpMetal: 140,
-    damage: 22,
-    range: 1,
-    speed: 1.8,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 5, // Initial guess
+    speed: 3,
     charisma: 2,
     armorWood: 4,
     armorMetal: 10,
-    capacity: 30,
+    capacity: 18,
     attackIntervalSec: 1.5, // Initial guess
   },
   movableBuildKitPlatform: {
     // Initial guess: construction unit — slow, high HP, no real combat.
     hpWood: 100,
     hpMetal: 160,
-    damage: 6,
-    range: 1,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 5, // Initial guess
     speed: 1.2,
     charisma: 3,
     armorWood: 5,
@@ -85,12 +113,13 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     hpWood: 70,
     hpMetal: 110,
     damage: 18,
-    range: 4,
-    speed: 3.0,
+    attackRange: 1,
+    sightRange: 5, // Initial guess
+    speed: 5.0,
     charisma: 1,
     armorWood: 2,
     armorMetal: 5,
-    capacity: 10,
+    capacity: 0,
     attackIntervalSec: 0.8, // Initial guess: fast attacker
   },
   spitterPlatform: {
@@ -98,25 +127,28 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     hpWood: 85,
     hpMetal: 130,
     damage: 24,
-    range: 5,
+    attackRange: 5,
+    sightRange: 8, // Initial guess
     speed: 2.2,
     charisma: 1,
     armorWood: 3,
     armorMetal: 8,
-    capacity: 10,
+    capacity: 0,
     attackIntervalSec: 1.2, // Initial guess
+    canAttackAir: true,
   },
   infiltrationPlatform: {
     // Initial guess: stealth/scout — lowest HP, highest speed, surprise damage.
     hpWood: 55,
     hpMetal: 85,
     damage: 28,
-    range: 1,
+    attackRange: 1,
+    sightRange: 8, // Initial guess
     speed: 4.0,
     charisma: 5,
     armorWood: 1,
     armorMetal: 3,
-    capacity: 15,
+    capacity: 0,
     attackIntervalSec: 0.8, // Initial guess: burst attacker
   },
   largeCombatPlatform: {
@@ -124,20 +156,24 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     hpWood: 200,
     hpMetal: 320,
     damage: 45,
-    range: 2,
-    speed: 1.0,
+    attackRange: 1,
+    sightRange: 5, // Initial guess
+    speed: 3.0,
     charisma: 0,
     armorWood: 10,
     armorMetal: 20,
-    capacity: 5,
+    capacity: 0,
     attackIntervalSec: 2.0, // Initial guess: slow heavy hitter
+    canAttackAir: true,
   },
   probePlatform: {
-    // Initial guess: fast scout — vision range bonus applied in game logic.
+    // Initial guess: fast scout — high sight, no attack.
     hpWood: 50,
     hpMetal: 80,
-    damage: 8,
-    range: 1,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 10, // Initial guess
+    flying: true,
     speed: 4.5,
     charisma: 4,
     armorWood: 1,
@@ -149,9 +185,10 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     // Initial guess: defensive unit — stationary, high armor, no mobility.
     hpWood: 300,
     hpMetal: 500,
-    damage: 12,
-    range: 1,
-    speed: 0.0,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 5, // Initial guess
+    speed: 1.0,
     charisma: 0,
     armorWood: 15,
     armorMetal: 30,
@@ -164,32 +201,37 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
 
 export const wizardUnitStats: Record<string, WizardStatBlock> = {
   archmage: {
-    // Initial guess: hero unit — unique, powerful, high charisma.
+    // Initial guess: hero unit — unique, powerful, high charisma. Cannot be converted.
     hp: 150,
     damage: 35,
-    range: 6,
+    attackRange: 6,
+    sightRange: 8, // Initial guess
     speed: 2.0,
     charisma: 15,
     armor: 8,
     capacity: 20,
     attackIntervalSec: 0.8, // Initial guess: hero — rapid fire
+    cannotBeConverted: true,
+    canAttackAir: true,
   },
   surf: {
     // Initial guess: mobile skirmisher — fast, moderate stats.
     hp: 80,
-    damage: 20,
-    range: 4,
-    speed: 3.5,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 8, // Initial guess
+    speed: 1.8,
     charisma: 5,
     armor: 4,
-    capacity: 15,
+    capacity: 25,
     attackIntervalSec: 1.0, // Initial guess
   },
   subject: {
     // Initial guess: basic civilian wizard — low combat, high charisma.
     hp: 70,
-    damage: 8,
-    range: 3,
+    damage: 0,
+    attackRange: 1,
+    sightRange: 8, // Initial guess
     speed: 2.0,
     charisma: 8,
     armor: 2,
@@ -200,7 +242,8 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     // Initial guess: combat mage — high damage, fragile. Needs mana.
     hp: 75,
     damage: 38,
-    range: 5,
+    attackRange: 5,
+    sightRange: 8, // Initial guess
     speed: 1.8,
     charisma: 3,
     armor: 3,
@@ -211,7 +254,8 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     // Initial guess: utility/support — low direct damage, abilities matter.
     hp: 72,
     damage: 14,
-    range: 4,
+    attackRange: 1,
+    sightRange: 8, // Initial guess
     speed: 2.2,
     charisma: 6,
     armor: 2,
@@ -222,18 +266,22 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     // Initial guess: apex unit — extremely powerful, very expensive.
     hp: 400,
     damage: 60,
-    range: 5,
-    speed: 3.0,
+    attackRange: 5,
+    sightRange: 8, // Initial guess
+    flying: true,
+    canAttackAir: true,
+    speed: 1.5,
     charisma: 2,
-    armor: 20,
+    armor: 0,
     capacity: 0,
     attackIntervalSec: 2.0, // Initial guess: slow powerful breath
   },
   enchantress: {
     // Initial guess: buff/debuff specialist — low direct damage.
     hp: 78,
-    damage: 12,
-    range: 4,
+    damage: 0,
+    attackRange: 4,
+    sightRange: 8, // Initial guess
     speed: 2.0,
     charisma: 8,
     armor: 3,
@@ -243,8 +291,9 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
   cleric: {
     // Initial guess: healer/support — no damage, high charisma.
     hp: 90,
-    damage: 5,
-    range: 3,
+    damage: 0,
+    attackRange: 3,
+    sightRange: 8, // Initial guess
     speed: 1.8,
     charisma: 10,
     armor: 4,
@@ -257,54 +306,59 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
 
 export type UnitRole = "combat" | "worker" | "support" | "spy" | "hero" | "tank" | "core";
 
+export const MILITARY_ROLES = new Set<UnitRole>(["combat", "tank", "hero", "spy"]);
+/** Unit typeKeys whose XP counts toward the Culture faction stat. */
+export const CIVILIAN_UNIT_TYPES = new Set(["core", "subject"]);
+
 export type LevelUpBonus = {
   hpPct: number;
   damagePct: number;
   armorPct: number;
   speedPct: number;
   charismaPct: number;
-  rangePct: number;
+  attackRangePct: number;
   capacityPct: number;
 };
 
 // Initial guess: +5% to role-relevant stats per level. Adjust after playtesting.
 export const levelUpBonuses: Record<UnitRole, LevelUpBonus> = {
-  combat:  { hpPct: 0, damagePct: 5, armorPct: 5,  speedPct: 0, charismaPct: 0, rangePct: 0, capacityPct: 0 },
-  worker:  { hpPct: 0, damagePct: 0, armorPct: 0,  speedPct: 5, charismaPct: 0, rangePct: 0, capacityPct: 5 },
-  support: { hpPct: 0, damagePct: 0, armorPct: 0,  speedPct: 0, charismaPct: 5, rangePct: 5, capacityPct: 0 },
-  spy:     { hpPct: 0, damagePct: 5, armorPct: 0,  speedPct: 5, charismaPct: 0, rangePct: 0, capacityPct: 0 },
-  hero:    { hpPct: 5, damagePct: 5, armorPct: 0,  speedPct: 0, charismaPct: 5, rangePct: 0, capacityPct: 0 },
-  tank:    { hpPct: 5, damagePct: 0, armorPct: 10, speedPct: 0, charismaPct: 0, rangePct: 0, capacityPct: 0 },
-  core:    { hpPct: 5, damagePct: 0, armorPct: 0,  speedPct: 0, charismaPct: 5, rangePct: 0, capacityPct: 0 },
+  combat: { hpPct: 0, damagePct: 5, armorPct: 5, speedPct: 0, charismaPct: 0, attackRangePct: 0, capacityPct: 0 },
+  worker: { hpPct: 0, damagePct: 0, armorPct: 0, speedPct: 5, charismaPct: 0, attackRangePct: 0, capacityPct: 5 },
+  support: { hpPct: 0, damagePct: 0, armorPct: 0, speedPct: 0, charismaPct: 5, attackRangePct: 5, capacityPct: 0 },
+  spy: { hpPct: 0, damagePct: 5, armorPct: 0, speedPct: 5, charismaPct: 0, attackRangePct: 0, capacityPct: 0 },
+  hero: { hpPct: 5, damagePct: 5, armorPct: 0, speedPct: 0, charismaPct: 5, attackRangePct: 0, capacityPct: 0 },
+  tank: { hpPct: 5, damagePct: 0, armorPct: 10, speedPct: 0, charismaPct: 0, attackRangePct: 0, capacityPct: 0 },
+  core: { hpPct: 5, damagePct: 0, armorPct: 0, speedPct: 0, charismaPct: 5, attackRangePct: 0, capacityPct: 0 },
 };
 
 export const unitRoles: Record<string, UnitRole> = {
   // Robot units
-  core:                    "core",
+  motherboard: "hero",
+  core: "core",
   waterCollectionPlatform: "worker",
-  woodChopperPlatform:     "worker",
+  woodChopperPlatform: "worker",
   movableBuildKitPlatform: "worker",
-  spinnerPlatform:         "combat",
-  spitterPlatform:         "combat",
-  infiltrationPlatform:    "spy",
-  largeCombatPlatform:     "tank",
-  probePlatform:           "support",
-  wallPlatform:            "tank",
+  spinnerPlatform: "combat",
+  spitterPlatform: "combat",
+  infiltrationPlatform: "spy",
+  largeCombatPlatform: "tank",
+  probePlatform: "support",
+  wallPlatform: "tank",
   // Wizard units
-  archmage:   "hero",
-  surf:       "spy",
-  subject:    "worker",
-  evoker:     "combat",
+  archmage: "hero",
+  surf: "spy",
+  subject: "worker",
+  evoker: "combat",
   illusionist: "support",
-  dragon:     "tank",
+  dragon: "tank",
   enchantress: "support",
-  cleric:     "worker",
+  cleric: "worker",
 };
 
 /** Named leaders spawned at game start — one per faction. */
 export const namedLeaders = {
   wizards: { typeKey: "archmage" as const, name: "Archmage Elara" },
-  robots:  { typeKey: "core"     as const, name: "Motherboard" },
+  robots: { typeKey: "motherboard" as const, name: "Motherboard" },
 } as const;
 
 /**
@@ -313,6 +367,7 @@ export const namedLeaders = {
  */
 export const unitPopulationBonus: Record<string, number> = {
   archmage: 2, // Confirmed: wizard leader adds 2 population slots
+  motherboard: 2, // Initial guess: robot leader adds 2 population slots (mirrors archmage)
 };
 
 // ── XP rates ─────────────────────────────────────────────────────────────────

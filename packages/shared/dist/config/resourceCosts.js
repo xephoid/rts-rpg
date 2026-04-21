@@ -1,49 +1,61 @@
 // Resource costs and production/construction durations.
 // Values marked "Initial guess" — update to "Confirmed" after playtesting sign-off.
+/** Game loop target — used to convert seconds → ticks for production durations. */
+export const TICKS_PER_SEC = 60;
+export const gatherRates = {
+    // Initial guess: fills a 20-capacity unit in ~40 ticks (GATHER_INTERVAL_TICKS=4 means
+    // one harvest per 4 ticks, so 20 capacity / 2 per-harvest = 10 harvests * 4 ticks = 40 ticks).
+    woodPerTick: 2,
+    waterPerTick: 2,
+};
+/** Ticks between each harvest action. Higher = slower gathering. 4 = 1/4 of single-tick speed. */
+export const GATHER_INTERVAL_TICKS = 4;
+/** XP awarded to a gatherer on each successful resource delivery. Initial guess. */
+export const gatherXpPerTrip = 5;
 // ── Robot unit costs ──────────────────────────────────────────────────────────
 export const robotUnitCosts = {
     // Initial guess: light units ~20-40w + 10-20w, 15-20s; heavy ~60-80w + 30-40w, 30-45s
-    core: { wood: 30, water: 15, productionTimeSec: 18 },
-    waterCollectionPlatform: { wood: 25, water: 12, productionTimeSec: 16 },
-    woodChopperPlatform: { wood: 28, water: 14, productionTimeSec: 17 },
-    movableBuildKitPlatform: { wood: 40, water: 20, productionTimeSec: 25 },
-    spinnerPlatform: { wood: 35, water: 18, productionTimeSec: 20 },
-    spitterPlatform: { wood: 50, water: 25, productionTimeSec: 28 },
-    infiltrationPlatform: { wood: 45, water: 22, productionTimeSec: 24 },
-    largeCombatPlatform: { wood: 75, water: 38, productionTimeSec: 42 },
+    core: { wood: 30, water: 15, productionTimeSec: 5 },
+    waterCollectionPlatform: { wood: 25, water: 12, productionTimeSec: 5 },
+    woodChopperPlatform: { wood: 28, water: 14, productionTimeSec: 5 },
+    movableBuildKitPlatform: { wood: 40, water: 20, productionTimeSec: 6 },
+    spinnerPlatform: { wood: 35, water: 18, productionTimeSec: 5 },
+    spitterPlatform: { wood: 50, water: 25, productionTimeSec: 10 },
+    infiltrationPlatform: { wood: 45, water: 22, productionTimeSec: 20 },
+    largeCombatPlatform: { wood: 75, water: 38, productionTimeSec: 30 },
     probePlatform: { wood: 20, water: 10, productionTimeSec: 14 },
-    wallPlatform: { wood: 60, water: 0, productionTimeSec: 30 },
+    wallPlatform: { wood: 60, water: 0, productionTimeSec: 20 },
 };
 // ── Wizard unit costs ─────────────────────────────────────────────────────────
 export const wizardUnitCosts = {
     archmage: { wood: 0, water: 80, productionTimeSec: 60 }, // Initial guess: unique hero
     surf: { wood: 20, water: 30, productionTimeSec: 20 },
     subject: { wood: 15, water: 20, productionTimeSec: 15 },
-    evoker: { wood: 30, water: 45, productionTimeSec: 28 },
-    illusionist: { wood: 28, water: 40, productionTimeSec: 26 },
-    dragon: { wood: 0, water: 150, productionTimeSec: 90 }, // Initial guess: apex unit
-    enchantress: { wood: 25, water: 38, productionTimeSec: 24 },
-    cleric: { wood: 20, water: 30, productionTimeSec: 20 },
+    evoker: { wood: 30, water: 45, productionTimeSec: 30 },
+    illusionist: { wood: 28, water: 40, productionTimeSec: 40 },
+    dragon: { wood: 0, water: 150, productionTimeSec: 120 }, // Initial guess: apex unit
+    enchantress: { wood: 25, water: 38, productionTimeSec: 25 },
+    cleric: { wood: 20, water: 30, productionTimeSec: 45 },
 };
 // ── Robot building costs ──────────────────────────────────────────────────────
 export const robotBuildingCosts = {
     home: { wood: 80, water: 0, constructionTimeSec: 45 },
     rechargeStation: { wood: 50, water: 20, constructionTimeSec: 30 },
-    immobileCombatPlatform: { wood: 70, water: 10, constructionTimeSec: 40 },
+    immobileCombatPlatform: { wood: 70, water: 10, constructionTimeSec: 20 },
     waterExtractor: { wood: 40, water: 0, constructionTimeSec: 25 },
     woodStorage: { wood: 30, water: 0, constructionTimeSec: 20 },
-    combatFrameProduction: { wood: 60, water: 15, constructionTimeSec: 35 },
+    combatFrameProduction: { wood: 60, water: 15, constructionTimeSec: 20 },
     combatResearchStation: { wood: 70, water: 20, constructionTimeSec: 40 },
     diplomaticResearchStation: { wood: 60, water: 20, constructionTimeSec: 35 },
     defensiveResearchStation: { wood: 65, water: 15, constructionTimeSec: 38 },
-    thirdSpace: { wood: 50, water: 10, constructionTimeSec: 30 },
+    thirdSpace: { wood: 50, water: 10, constructionTimeSec: 40 },
 };
 // ── Wizard building costs ─────────────────────────────────────────────────────
 export const wizardBuildingCosts = {
     castle: { wood: 120, water: 40, constructionTimeSec: 60 },
     cottage: { wood: 30, water: 10, constructionTimeSec: 20 },
     wall: { wood: 50, water: 0, constructionTimeSec: 25 },
-    wizardTower: { wood: 60, water: 20, constructionTimeSec: 35 },
+    wizardTower: { wood: 60, water: 20, constructionTimeSec: 40 },
     watermill: { wood: 40, water: 0, constructionTimeSec: 25 },
     logCabin: { wood: 35, water: 5, constructionTimeSec: 22 },
     manaReservoir: { wood: 50, water: 30, constructionTimeSec: 32 },
@@ -73,17 +85,25 @@ export const researchCosts = {
 };
 // ── Resource deposits ─────────────────────────────────────────────────────────
 export const woodDeposit = {
-    // Initial guess: deposits are finite. Each deposit has 400-800 wood.
-    // Rationale: forces expansion and prevents turtling forever.
-    quantityMin: 400,
-    quantityMax: 800,
-    regenerates: false, // Initial guess: finite — adjust if turtling is a problem
+    // Initial guess: every forest tile has 250 wood. Adjust after playtesting.
+    quantity: 250,
+    regenerates: false,
 };
-// ── Auto-collection rates (per tick) ─────────────────────────────────────────
+export const waterDeposit = {
+    // Initial guess: every water tile has 1000 water — water is harder to exhaust than wood.
+    // Adjust after playtesting.
+    quantity: 1000,
+    regenerates: false,
+};
+// ── Auto-collection rates ─────────────────────────────────────────────────────
+/**
+ * Auto-collection fires once every this many ticks (= once per second at TICKS_PER_SEC=60).
+ * Values below are per-collection-event, not per-tick.
+ */
+export const AUTO_COLLECTION_INTERVAL_TICKS = 60; // Initial guess: 1 collection per second
 export const autoCollectionRates = {
-    // Initial guess: 1 tick = 1 second
-    waterExtractorPerTick: 2, // Initial guess
-    watermillPerTick: 2, // Initial guess
+    waterExtractorPerInterval: 1, // Initial guess: 1 water per second
+    watermillPerInterval: 1, // Initial guess: 1 water per second
 };
 // ── Resource alert thresholds ─────────────────────────────────────────────────
 export const resourceAlertThresholds = {

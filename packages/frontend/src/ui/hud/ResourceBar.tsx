@@ -5,6 +5,8 @@ import styles from "./ResourceBar.module.css";
 export function ResourceBar() {
   const gameState = useGameStore((s) => s.gameState);
   const activeFaction = useUIStore((s) => s.activeFaction);
+  const statsOpen = useUIStore((s) => s.statsOpen);
+  const setStatsOpen = useUIStore((s) => s.setStatsOpen);
 
   const resources = gameState?.resources[activeFaction] ?? { wood: 0, water: 0, mana: 0 };
   const population = gameState?.population[activeFaction] ?? { count: 0, cap: 0 };
@@ -45,6 +47,12 @@ export function ResourceBar() {
       </div>
 
       <div className={styles.tick}>tick {tick}</div>
+      <button
+        className={`${styles.statsButton} ${statsOpen ? styles.statsButtonActive : ""}`}
+        onClick={() => setStatsOpen(!statsOpen)}
+      >
+        Stats
+      </button>
     </div>
   );
 }

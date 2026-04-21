@@ -30,9 +30,8 @@
   flex: 1;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(2, 1fr);
-  gap: 4px;
-  padding: 8px;
+  gap: 3px;
+  padding: 4px;
   align-content: start;
 }
 
@@ -40,12 +39,12 @@
   position: relative;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
+  border-radius: 3px;
   color: #9ca3af;
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: 9px;
   cursor: pointer;
-  padding: 6px 4px;
+  padding: 3px 2px;
   transition: background 0.1s, color 0.1s;
   display: flex;
   flex-direction: column;
@@ -72,21 +71,21 @@
 
 .cmdBtn .cost {
   display: block;
-  font-size: 9px;
+  font-size: 8px;
   color: #6b7280;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .prodIcon {
-  width: 36px;
-  height: 36px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
   image-rendering: pixelated;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .prodLabel {
-  font-size: 11px;
+  font-size: 9px;
   color: #e5e7eb;
   white-space: nowrap;
   overflow: hidden;
@@ -96,32 +95,32 @@
 
 .cost {
   display: block;
-  font-size: 9px;
+  font-size: 8px;
   color: #6b7280;
   margin-top: 1px;
 }
 
 .queueBadge {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 2px;
+  right: 2px;
   background: #f59e0b;
   color: #000;
-  font-size: 10px;
+  font-size: 8px;
   font-weight: bold;
-  border-radius: 8px;
-  padding: 0 4px;
-  min-width: 14px;
+  border-radius: 6px;
+  padding: 0 3px;
+  min-width: 10px;
   text-align: center;
-  line-height: 14px;
+  line-height: 11px;
   pointer-events: none;
 }
 
 .lockBadge {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  font-size: 10px;
+  top: 2px;
+  right: 2px;
+  font-size: 8px;
   pointer-events: none;
   line-height: 1;
 }
@@ -142,6 +141,17 @@
   color: #ddd6fe;
 }
 
+.cmdBtnSpell {
+  background: rgba(139, 92, 246, 0.14);
+  border-color: rgba(139, 92, 246, 0.45);
+  color: #c4b5fd;
+}
+
+.cmdBtnSpell:hover {
+  background: rgba(139, 92, 246, 0.25);
+  color: #ddd6fe;
+}
+
 .cmdBtnDone {
   opacity: 0.55;
   border-color: rgba(52, 211, 153, 0.3);
@@ -149,16 +159,16 @@
 
 .doneBadge {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 2px;
+  right: 2px;
   background: #34d399;
   color: #000;
-  font-size: 10px;
+  font-size: 8px;
   font-weight: bold;
-  border-radius: 8px;
-  padding: 0 4px;
-  min-width: 14px;
+  border-radius: 6px;
+  padding: 0 3px;
+  min-width: 10px;
   text-align: center;
-  line-height: 14px;
+  line-height: 11px;
   pointer-events: none;
 }

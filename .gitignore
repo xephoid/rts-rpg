@@ -5,3 +5,9 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Local tool state
+.claude/
+
+# Large source asset bundles (zips of Kenney packs, raw PSDs, etc.)
+raw art assets/
