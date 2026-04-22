@@ -161,6 +161,23 @@ export type SpellEvent = {
   targetPos: Vec2;
 };
 
+/**
+ * A point-of-interest ping for the minimap. Engine emits one alongside each
+ * notable alert (building/unit produced, own unit/building under attack),
+ * the minimap renders each as a red circle whose radius shrinks to zero
+ * over the ping's lifetime — draws the viewer's eye to the source tile.
+ *
+ * Each emission carries the tick it was fired at so the renderer can derive
+ * the age from `snapshot.tick - ping.emittedTick`. Pings drop off the
+ * snapshot once they've aged past `pingConfig.durationTicks`.
+ */
+export type PingEvent = {
+  id: string;
+  kind: "underAttack" | "buildingComplete" | "unitComplete";
+  position: Vec2;
+  emittedTick: number;
+};
+
 export type FactionStats = {
   militaryStrength: number;
   culture: number;
@@ -242,4 +259,8 @@ export type GameStateSnapshot = {
    *  converted at least once. Used by the tech-progress UI and the engine's
    *  victory detection. Entries are permanent — once added, never removed. */
   unlockedItems: Record<Faction, string[]>;
+  /** Active minimap pings this tick. Each carries its own `emittedTick` so
+   *  the renderer can compute age = current `tick` − `emittedTick` and derive
+   *  the shrink animation. Pings self-drop once past the config duration. */
+  pings: PingEvent[];
 };

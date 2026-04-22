@@ -19,6 +19,25 @@ export const aiParameters = {
   underAttackAlertCooldownTicks: 60 * 10,
 };
 
+/**
+ * Minimap ping animation tuning. A ping is a red circle that appears at the
+ * source tile of a notable alert and shrinks from `startRadiusTiles` to 0
+ * over `durationTicks`, then disappears. Values are Initial guesses.
+ */
+export const pingConfig = {
+  /** Total ping lifetime in ticks (60 ticks/sec). 90 ticks = 1.5s feels
+   *  long enough to catch the eye without being intrusive. */
+  durationTicks: 90,
+  /** Radius (in world tiles) at the start of the animation. On a 64×64 map
+   *  this is ~15% of the map edge — big enough to notice on the minimap. */
+  startRadiusTiles: 10,
+  /** Under-attack pings are throttled to the same cooldown as the text
+   *  alert so combat doesn't spawn dozens of overlapping pings per second. */
+  underAttackPingCooldownTicks: 60 * 5, // 5s — half the alert cooldown so
+                                        // visuals can outpace the log text
+                                        // when the player is near action.
+};
+
 // NPC faction starting alignment (-100 = hostile, 0 = neutral, 100 = allied)
 export type FactionAlignment = {
   towardWizards: number;

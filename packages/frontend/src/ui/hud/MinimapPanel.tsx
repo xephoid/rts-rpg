@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { factionColors } from "@neither/shared";
+import { factionColors, pingConfig } from "@neither/shared";
 import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
 import styles from "./MinimapPanel.module.css";
@@ -100,6 +100,28 @@ export function MinimapPanel() {
         Math.max(2, Math.ceil(scale)),
         Math.max(2, Math.ceil(scale)),
       );
+    }
+
+    // Pings — red circles that shrink from `pingConfig.startRadiusTiles` to
+    // 0 over their duration. Alpha fades to match so a stale ping doesn't
+    // leave a hard edge in the final frame. Drawn above entity dots so the
+    // eye catches them even when their source is under a cluster.
+    if (gameState.pings.length > 0) {
+      ctx.save();
+      for (const ping of gameState.pings) {
+        const age = gameState.tick - ping.emittedTick;
+        if (age < 0 || age > pingConfig.durationTicks) continue;
+        const t = age / pingConfig.durationTicks; // 0..1
+        const radiusTiles = pingConfig.startRadiusTiles * (1 - t);
+        const cx = ping.position.x * scale;
+        const cy = ping.position.y * scale;
+        ctx.strokeStyle = `rgba(255, 68, 68, ${1 - t})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(1, radiusTiles * scale), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     // Viewport box

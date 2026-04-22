@@ -538,4 +538,45 @@ describe("Combat notifications", () => {
     for (let t = 0; t < 2000; t++) engine.stepTick(t, t * 16);
     expect(alerts.some((m) => m.includes("subject") && m.includes("ready"))).toBe(true);
   });
+
+  it("emits a minimap ping when a player-faction unit is under attack", () => {
+    let lastSnap: { pings: { kind: string; position: { x: number; y: number } }[] } | null = null;
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards",
+      onTick: (s) => { lastSnap = s; },
+    });
+
+    const wStats = wizardUnitStats.evoker!;
+    const victim = new UnitEntity({
+      faction: "wizards", typeKey: "evoker", position: { x: 40, y: 40 },
+      stats: {
+        maxHp: wStats.hp, damage: wStats.damage,
+        attackRange: wStats.attackRange, sightRange: wStats.sightRange,
+        speed: wStats.speed, charisma: wStats.charisma,
+        armor: wStats.armor, capacity: wStats.capacity,
+      },
+    });
+    engine.entities.add(victim);
+
+    const sStats = robotUnitStats.spitterPlatform!;
+    const attacker = new UnitEntity({
+      faction: "robots", typeKey: "spitterPlatform", position: { x: 41, y: 40 },
+      stats: {
+        maxHp: sStats.hpWood, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armorWood, capacity: sStats.capacity,
+      },
+    });
+    attacker.attachedCoreId = "fake";
+    engine.entities.add(attacker);
+    engine.issueAttackOrder(attacker.id, victim.id);
+
+    // Run enough ticks to land the first hit but not past the ping duration
+    // (pings self-drop from the snapshot after `pingConfig.durationTicks`).
+    for (let t = 0; t < 60; t++) engine.stepTick(t, t * 16);
+
+    const snap = lastSnap as { pings: { kind: string; position: { x: number; y: number } }[] } | null;
+    expect(snap?.pings.some((p) => p.kind === "underAttack")).toBe(true);
+  });
 });

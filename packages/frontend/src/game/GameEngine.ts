@@ -1,7 +1,7 @@
 // Game simulation engine — pure TypeScript, no imports from /renderer, /ui, /store.
 // Pushes GameStateSnapshot to the store bridge after each tick via onTick callback.
 
-import type { Faction, FactionStats, FogSnapshot, GameStateSnapshot, Vec2, DepositSnapshot, AttackEvent, SpellEvent, DiplomaticProposal, DiplomaticProposalKind, Species } from "@neither/shared";
+import type { Faction, FactionStats, FogSnapshot, GameStateSnapshot, Vec2, DepositSnapshot, AttackEvent, SpellEvent, PingEvent, DiplomaticProposal, DiplomaticProposalKind, Species } from "@neither/shared";
 import {
   startingResources,
   mapSizes,
@@ -57,6 +57,7 @@ import {
   uiText,
   diplomacy as diplomacyConfig,
   aiParameters,
+  pingConfig,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
@@ -216,20 +217,72 @@ export class GameEngine {
    *  this for throttling / alert cooldown without threading the param. */
   private _currentTick = 0;
 
+  /** Active minimap pings. Emitted alongside each notable alert; the
+   *  renderer reads them from the snapshot and draws a shrinking red
+   *  circle whose radius is a function of age vs `pingConfig.durationTicks`.
+   *  Entries self-drop from the list once their age exceeds the duration. */
+  private _pings: PingEvent[] = [];
+  /** Per-target-entity last-ping tick, for the under-attack pings only.
+   *  Decouples from the text-alert cooldown so two simultaneous engagements
+   *  on different targets each get their own ping even when the text log
+   *  has already quieted down. */
+  private _lastUnderAttackPingTick = new Map<string, number>();
+  /** Monotonic id source for pings so the renderer can key its animation
+   *  state per unique event without needing deep equality. */
+  private _pingIdCounter = 0;
+
   /**
-   * Fire an "under attack" alert for the victim's owning faction, but at most
-   * once per `aiParameters.underAttackAlertCooldownTicks`. Only the human
-   * player's own-faction damage surfaces; AI-vs-AI combat stays quiet.
+   * Push a ping onto the active list. No-ops for non-player factions
+   * (we only draw the player's own-faction alert sources on the minimap).
+   * Under-attack pings additionally respect a per-target throttle so a
+   * unit taking continuous damage only fires one ping every
+   * `underAttackPingCooldownTicks`.
+   */
+  private _emitPing(kind: PingEvent["kind"], faction: Faction, position: Vec2, throttleKey?: string): void {
+    if (!this._isPlayerFaction(faction)) return;
+    if (throttleKey) {
+      const last = this._lastUnderAttackPingTick.get(throttleKey) ?? -Infinity;
+      if (this._currentTick - last < pingConfig.underAttackPingCooldownTicks) return;
+      this._lastUnderAttackPingTick.set(throttleKey, this._currentTick);
+    }
+    this._pings.push({
+      id: `ping_${this._pingIdCounter++}`,
+      kind,
+      position: { x: position.x, y: position.y },
+      emittedTick: this._currentTick,
+    });
+  }
+
+  /**
+   * Fire an "under attack" alert + minimap ping for the victim's owning
+   * faction. Text alert throttles per-faction so sustained combat doesn't
+   * flood the log; the ping throttles per-target so two simultaneous
+   * engagements on different units each get their own visual.
    */
   private _maybeUnderAttackAlert(target: Entity): void {
     if (!this._isPlayerFaction(target.faction)) return;
+    // Text alert — per-faction throttle.
     const last = this._lastUnderAttackAlertTick[target.faction];
-    if (this._currentTick - last < aiParameters.underAttackAlertCooldownTicks) return;
-    this._lastUnderAttackAlertTick[target.faction] = this._currentTick;
-    const msg = target.kind === "building"
-      ? uiText.notifications.buildingUnderAttack(target.typeKey)
-      : uiText.notifications.unitUnderAttack(target.typeKey);
-    this.onAlert?.(msg);
+    if (this._currentTick - last >= aiParameters.underAttackAlertCooldownTicks) {
+      this._lastUnderAttackAlertTick[target.faction] = this._currentTick;
+      const msg = target.kind === "building"
+        ? uiText.notifications.buildingUnderAttack(target.typeKey)
+        : uiText.notifications.unitUnderAttack(target.typeKey);
+      this.onAlert?.(msg);
+    }
+    // Minimap ping — per-target throttle. Buildings take their AABB center
+    // so the ping lands on the sprite, not the top-left corner tile.
+    const pingPos = target.kind === "building"
+      ? this._buildingCenter(target as BuildingEntity)
+      : target.position;
+    this._emitPing("underAttack", target.faction, pingPos, target.id);
+  }
+
+  /** Center of a building's footprint in world tiles — lands pings and
+   *  similar point markers on the sprite rather than the top-left corner. */
+  private _buildingCenter(b: BuildingEntity): Vec2 {
+    const fp = this._buildingStatsFor(b.faction)[b.typeKey]?.footprintTiles ?? 1;
+    return { x: b.position.x + fp / 2, y: b.position.y + fp / 2 };
   }
 
   /** One MilitaryAI per non-human active faction. Empty in headless mode (no
@@ -1334,6 +1387,7 @@ export class GameEngine {
         this._unlockedItems[building.faction].add(building.typeKey);
         if (this._isPlayerFaction(building.faction)) {
           this.onAlert?.(uiText.notifications.buildingComplete(building.typeKey));
+          this._emitPing("buildingComplete", building.faction, this._buildingCenter(building));
         }
         if (SINGLE_USE_BUILDERS.has(unit.typeKey)) {
           // Eject any attached Core before removing the platform
@@ -2414,6 +2468,7 @@ export class GameEngine {
     // Notify the player when one of their own units finishes production.
     if (this._isPlayerFaction(building.faction)) {
       this.onAlert?.(uiText.notifications.unitComplete(unitTypeKey));
+      this._emitPing("unitComplete", building.faction, unit.position);
     }
   }
 
@@ -3663,6 +3718,13 @@ export class GameEngine {
       unlockedSnap[f] = [...this._unlockedItems[f]];
     }
 
+    // Drop pings that have aged past their animation lifetime. The remaining
+    // list is included in the snapshot so the renderer can compute each
+    // ping's current shrink fraction from (tick - emittedTick) / duration.
+    this._pings = this._pings.filter(
+      (p) => tick - p.emittedTick < pingConfig.durationTicks,
+    );
+
     this.onTick({
       tick,
       elapsedMs,
@@ -3684,6 +3746,7 @@ export class GameEngine {
       factionSpecies: { ...this.factionSpecies },
       activeFactions: [...this.activeFactions],
       unlockedItems: unlockedSnap,
+      pings: [...this._pings],
     });
   }
 
