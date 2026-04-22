@@ -156,7 +156,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 2,
     visionRange: 4,
     footprintTiles: 3,
-    populationSupport: 4,
+    populationSupport: 0, // Pop cap comes exclusively from Home + Recharge Station.
   },
   aerialFrameProduction: {
     // Initial guess: aerial-unit production building (Probe + Stinger).
@@ -188,7 +188,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 4,
     visionRange: 3,
     footprintTiles: 3,
-    populationSupport: 4,
+    populationSupport: 0, // Pop cap comes exclusively from Home + Recharge Station.
   },
 };
 
@@ -281,7 +281,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 1,
     visionRange: 5,
     footprintTiles: 3,
-    populationSupport: 2,
+    populationSupport: 0, // Pop cap comes exclusively from Castle + Cottage.
   },
   temple: {
     // Initial guess: cultural/religious building — high occupants.
@@ -289,7 +289,7 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
     occupantCapacity: 6,
     visionRange: 4,
     footprintTiles: 3,
-    populationSupport: 6, // Initial guess: temple houses congregants.
+    populationSupport: 0, // Pop cap comes exclusively from Castle + Cottage.
   },
   embassy: {
     // Initial guess: diplomacy building.
