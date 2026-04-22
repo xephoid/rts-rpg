@@ -2963,7 +2963,28 @@ export class GameEngine {
         const e = this.entities.get(id);
         if (!e || e.kind !== "unit") continue;
         const u = e as UnitEntity;
-        this.onAlert?.(uiText.spy.alertDetected(u.name ?? u.typeKey));
+        // Re-scan for the detector that caught this target so the in-game alert
+        // includes the same diagnostic the console.warn emits. Without this the
+        // player has no way to know which enemy unit blew their cover.
+        const detectors = this.entities
+          .unitsByFaction(viewer)
+          .filter((d) => d.isDetector && active(d));
+        let culprit: UnitEntity | null = null;
+        let culpritDist = Infinity;
+        for (const d of detectors) {
+          const dx = u.position.x - d.position.x;
+          const dy = u.position.y - d.position.y;
+          const dSq = dx * dx + dy * dy;
+          if (dSq <= d.stats.sightRange * d.stats.sightRange && dSq < culpritDist) {
+            culprit = d;
+            culpritDist = dSq;
+          }
+        }
+        const base = uiText.spy.alertDetected(u.name ?? u.typeKey);
+        const detail = culprit
+          ? ` (${culprit.typeKey} at dist ${Math.sqrt(culpritDist).toFixed(1)})`
+          : "";
+        this.onAlert?.(base + detail);
       }
       this._previousDetectedIds[viewer] = new Set(curr);
     }
