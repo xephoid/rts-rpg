@@ -83,6 +83,54 @@ describe("TechnologyAI — archetype instantiation", () => {
     // it should stay pending.
     expect(robotProposal?.kind).toBe("openBorders");
   });
+
+  it("asks for a unit after open borders + non-combat are already signed", () => {
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards", onTick: () => {},
+    });
+    engine.setMet("wizards", "robots");
+    engine.setAlignment("robots", "wizards", diplomacyConfig.aiAcceptThreshold + 5);
+    engine.setAlignment("wizards", "robots", diplomacyConfig.aiAcceptThreshold + 5);
+
+    // Force-sign both treaties so the tech AI falls through to unitRequest.
+    // Skip the proposal flow — poke the engine's internal state directly.
+    const internals = engine as unknown as {
+      _openBorders: Record<string, Record<string, boolean>>;
+      _nonCombatTreaties: Record<string, Record<string, boolean>>;
+    };
+    internals._openBorders.robots!.wizards = true;
+    internals._openBorders.wizards!.robots = true;
+    internals._nonCombatTreaties.robots!.wizards = true;
+    internals._nonCombatTreaties.wizards!.robots = true;
+
+    // Spawn an eligible target — a wizard Subject the robot AI hasn't unlocked yet.
+    const sStats = wizardUnitStats.subject!;
+    const subject = new UnitEntity({
+      faction: "wizards", typeKey: "subject", position: { x: 50, y: 50 },
+      stats: {
+        maxHp: sStats.hp, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armor, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(subject);
+
+    const ais = (engine as unknown as { _ais: Array<{ tick: (t: number, e: unknown) => void }> })._ais;
+    ais.length = 0;
+    ais.push(new TechnologyAI("robots", "robots") as unknown as { tick: (t: number, e: unknown) => void });
+
+    engine.stepTick(0, 0);
+    const unitProposal = engine.getPendingProposals().find(
+      (p) => p.from === "robots" && p.to === "wizards" && p.kind === "unitRequest",
+    );
+    // Tech AI should propose a unit request against SOME wizard unit whose
+    // typeKey it hasn't unlocked. Exact instance is order-dependent on the
+    // entity iteration — any valid wizard typeKey not in the robot roster
+    // qualifies (surf, subject, evoker, etc.).
+    expect(unitProposal).toBeDefined();
+    expect(unitProposal?.unitId).toBeDefined();
+  });
 });
 
 // Ignore the imports we don't always use.

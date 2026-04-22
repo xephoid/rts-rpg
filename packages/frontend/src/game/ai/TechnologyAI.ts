@@ -548,8 +548,62 @@ export class TechnologyAI {
       if (!ncSigned && !alreadyProposedNC) {
         engine.issueProposeDiplomaticAction(this.faction, other, "nonCombat");
         this._log(`propose nonCombat → ${other} (align=${align.toFixed(0)})`);
+        continue;
+      }
+
+      // Unit request — the diplomatic analogue to Convert. Any opposing
+      // unit typeKey we haven't unlocked yet is a candidate. Accepting the
+      // proposal transfers the unit AND checks its typeKey off our tech
+      // victory list (engine mirrors this into `_unlockedItems`). Safer
+      // than Convert for civilians — no adjacency, no combat exposure.
+      const unlocked = new Set<string>(); // built lazily only if we'll use it
+      const needed = technologicalVictory.requiredItems.filter((it) => !this._isResearchItem(it));
+      let bestUnitId: string | null = null;
+      for (const e of engine.entities.unitsByFaction(other)) {
+        if (e.cannotBeConverted) continue; // leader — engine rejects the transfer
+        if (e.state.kind === "platformShell" || e.state.kind === "inPlatform" ||
+            e.state.kind === "garrisoned" || e.state.kind === "hidingInBuilding") continue;
+        // Lazy-seed the unlocked set once we have a viable candidate.
+        if (unlocked.size === 0) {
+          for (const f of engine.getActiveFactions()) void f; // no-op, keeps TS linter
+          // Faction stats snapshot doesn't include unlockedItems, so pull
+          // them via a faction-stats side-channel: we use our own
+          // `_hasUnlocked` helper below. Cheaper than reading the snapshot.
+        }
+        if (this._hasUnlocked(engine, e.typeKey)) continue;
+        if (!(needed as readonly string[]).includes(e.typeKey)) continue;
+        bestUnitId = e.id;
+        break;
+      }
+      if (bestUnitId) {
+        const alreadyProposedUnit = pending.some(
+          (p) => p.from === this.faction && p.to === other
+            && p.kind === "unitRequest" && p.unitId === bestUnitId,
+        );
+        if (!alreadyProposedUnit) {
+          engine.issueProposeDiplomaticAction(this.faction, other, "unitRequest", { unitId: bestUnitId });
+          this._log(`propose unitRequest → ${other} unit=${bestUnitId} (align=${align.toFixed(0)})`);
+        }
       }
     }
+  }
+
+  /** True if the given typeKey is already on our tech-victory list. Reads
+   *  through the engine's completed-research mirror for research items and
+   *  falls back to a scan of our own entities for unit/building types —
+   *  because `_unlockedItems` itself isn't part of `AIEngineInterface`
+   *  (keeping that surface tight), but every unlocked item is either a
+   *  research we've finished or an entity typeKey we've owned at some
+   *  point. This is a serviceable approximation: we'll occasionally
+   *  re-request a typeKey we ALREADY unlocked via a since-dead transfer,
+   *  but the engine will still accept it and it's a no-op for tech
+   *  progress (Set.add is idempotent). */
+  private _hasUnlocked(engine: AIEngineInterface, typeKey: string): boolean {
+    if (engine.hasCompletedResearch(this.faction, typeKey)) return true;
+    // Scan own entities for an instance of this typeKey.
+    for (const u of engine.entities.unitsByFaction(this.faction)) if (u.typeKey === typeKey) return true;
+    for (const b of engine.entities.buildingsByFaction(this.faction)) if (b.typeKey === typeKey) return true;
+    return false;
   }
 
   private _respondToProposals(engine: AIEngineInterface): void {

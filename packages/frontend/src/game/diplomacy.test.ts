@@ -145,6 +145,25 @@ describe("Phase 14 — Diplomacy", () => {
     expect(unit.faction).toBe("wizards");
   });
 
+  it("unit request accept adds the requested typeKey to the requester's tech-victory list", () => {
+    let lastSnap: { unlockedItems: Record<string, string[]> } | null = null;
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1,
+      onTick: (s) => { lastSnap = s; },
+    });
+    engine.setMet("wizards", "robots");
+    const unit = spawnSpitter(engine, "robots", { x: 20, y: 20 });
+    engine.issueProposeDiplomaticAction("wizards", "robots", "unitRequest", {
+      unitId: unit.id,
+    });
+    const proposal = engine.getPendingProposals()[0]!;
+    engine.issueRespondToProposal(proposal.id, true);
+    // Tick once so the snapshot reflects the post-accept unlocked set.
+    engine.stepTick(0, 0);
+    const snap = lastSnap as { unlockedItems: Record<string, string[]> } | null;
+    expect(snap?.unlockedItems.wizards).toContain("spitterPlatform");
+  });
+
   it("combat damage lowers alignment of the attacked faction", () => {
     const engine = makeEngine();
     // Use an evoker (wizard roster) vs a spitter so the attacker is a valid

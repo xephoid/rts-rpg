@@ -3116,6 +3116,11 @@ export class GameEngine {
         const ent = this.entities.get(p.unitId);
         if (!ent || ent.kind !== "unit" || ent.faction !== p.to) return;
         ent.faction = p.from;
+        // Tech-victory cross-species unlock — same rule as Convert: once a
+        // faction has access to a unit of a given typeKey, it's checked off
+        // their checklist permanently. Unit requests are the diplomatic
+        // path; conversion is the hostile path. Both count.
+        this._unlockedItems[p.from].add(ent.typeKey);
         this._adjustAlignment(p.from, p.to, diplomacyConfig.alignmentOnUnitRequestAccept);
         this._adjustAlignment(p.to, p.from, diplomacyConfig.alignmentOnUnitRequestAccept);
         if (this._isPlayerFaction(p.from)) {
