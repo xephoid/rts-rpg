@@ -39,6 +39,14 @@ export declare const wizardUnitStats: Record<string, WizardStatBlock>;
 export declare const CONCEALED_TYPES: Set<string>;
 /** Unit typeKeys that reveal concealed/disguised/invisible enemies within their sightRange. */
 export declare const DETECTOR_TYPES: Set<string>;
+/**
+ * Every robot typeKey that functions as a Core-driven platform. Derived from
+ * `robotUnitStats` minus the two Core typeKeys — platforms are everything a Core
+ * can attach to. Canonical source of truth: import from here instead of copying.
+ * Used by the engine (movement gates), renderer (right-click attach hit-test),
+ * and UI (production panel) to decide what counts as a "platform".
+ */
+export declare const ROBOT_PLATFORM_TYPES: ReadonlySet<string>;
 export type UnitRole = "combat" | "worker" | "support" | "spy" | "hero" | "tank" | "core";
 export declare const MILITARY_ROLES: Set<UnitRole>;
 /** Unit typeKeys whose XP counts toward the Culture faction stat. */

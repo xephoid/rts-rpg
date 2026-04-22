@@ -17,16 +17,12 @@ import {
   wizardUnitStats,
   robotUnitStats,
   illusionistInvisibilityResearchKey,
+  ROBOT_PLATFORM_TYPES,
 } from "@neither/shared";
 import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
 import styles from "./CommandsPanel.module.css";
 
-const ROBOT_PLATFORM_TYPES_UI = new Set([
-  "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform",
-  "spinnerPlatform", "spitterPlatform", "infiltrationPlatform",
-  "largeCombatPlatform", "probePlatform", "wallPlatform",
-]);
 const WIZARD_UNIT_TYPES_UI = new Set(Object.keys(wizardUnitStats));
 
 const UNIT_COMMANDS = ["Move", "Stop", "Attack", "Patrol", "Hold", "Talk", "Convert", "Board"];
@@ -149,7 +145,7 @@ export function CommandsPanel() {
                            e.buildingState !== "underConstruction"
                   )
                 : false;
-              const isPlatform = ROBOT_PLATFORM_TYPES_UI.has(typeKey);
+              const isPlatform = ROBOT_PLATFORM_TYPES.has(typeKey);
               const dragonCapped = typeKey === "dragon" && liveAndQueuedDragons >= hoardCount;
               const disabled = queueFull || !canAfford || (!isPlatform && atPopCap) || isLocked || isResearching || dragonCapped;
               const queueCount =
@@ -424,7 +420,7 @@ export function CommandsPanel() {
         })}
         {selection.mode === "single" && selection.kind === "unit" && (() => {
           const entity = gameState?.entities.find((e) => e.id === selection.id);
-          if (entity && ROBOT_PLATFORM_TYPES_UI.has(entity.typeKey) && entity.attachedCoreId) {
+          if (entity && ROBOT_PLATFORM_TYPES.has(entity.typeKey) && entity.attachedCoreId) {
             return (
               <button
                 key="Detach"

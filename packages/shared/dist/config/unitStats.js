@@ -272,6 +272,14 @@ export const wizardUnitStats = {
 export const CONCEALED_TYPES = new Set(["infiltrationPlatform", "illusionist"]);
 /** Unit typeKeys that reveal concealed/disguised/invisible enemies within their sightRange. */
 export const DETECTOR_TYPES = new Set(["probePlatform", "enchantress"]);
+/**
+ * Every robot typeKey that functions as a Core-driven platform. Derived from
+ * `robotUnitStats` minus the two Core typeKeys — platforms are everything a Core
+ * can attach to. Canonical source of truth: import from here instead of copying.
+ * Used by the engine (movement gates), renderer (right-click attach hit-test),
+ * and UI (production panel) to decide what counts as a "platform".
+ */
+export const ROBOT_PLATFORM_TYPES = new Set(Object.keys(robotUnitStats).filter((k) => k !== "core" && k !== "motherboard"));
 export const MILITARY_ROLES = new Set(["combat", "tank", "hero", "spy"]);
 /** Unit typeKeys whose XP counts toward the Culture faction stat. */
 export const CIVILIAN_UNIT_TYPES = new Set(["core", "subject"]);

@@ -47,6 +47,7 @@ import {
   HIDING_CAPABLE_BUILDINGS,
   HIDEABLE_UNIT_TYPES,
   hidingBuildingConfig,
+  ROBOT_PLATFORM_TYPES,
   uiText,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
@@ -90,11 +91,6 @@ const PLATFORM_RESOURCE_RESTRICTION: Record<string, "wood" | "water"> = {
   woodChopperPlatform: "wood",
   waterCollectionPlatform: "water",
 };
-const ROBOT_PLATFORM_TYPES = new Set([
-  "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform",
-  "spinnerPlatform", "spitterPlatform", "infiltrationPlatform",
-  "largeCombatPlatform", "probePlatform", "wallPlatform",
-]);
 const WIZARD_UNIT_TYPES = new Set(Object.keys(wizardUnitStats));
 /**
  * Max tile radius a gatherer will search for the next deposit after exhausting one.

@@ -3,7 +3,7 @@
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
 import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot, AttackEvent, SpellEvent } from "@neither/shared";
-import { robotBuildingStats, wizardBuildingStats, robotUnitStats, wizardUnitStats, buildingRequiresAdjacentWater } from "@neither/shared";
+import { robotBuildingStats, wizardBuildingStats, robotUnitStats, wizardUnitStats, buildingRequiresAdjacentWater, ROBOT_PLATFORM_TYPES } from "@neither/shared";
 import {
   terrainAssets,
   unitSpritePath,
@@ -19,11 +19,6 @@ export const TILE_SIZE = 64; // pixels at zoom level 1.0
 /** Four discrete zoom levels as per spec. */
 export const ZOOM_LEVELS = [0.375, 0.75, 1.0, 1.5] as const;
 
-const ROBOT_PLATFORM_TYPES = new Set([
-  "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform",
-  "spinnerPlatform", "spitterPlatform", "infiltrationPlatform",
-  "largeCombatPlatform", "probePlatform", "wallPlatform",
-]);
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 
 export type RendererConfig = {
