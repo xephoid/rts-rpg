@@ -58,9 +58,12 @@ describe("MilitaryAI — N-faction expansion", () => {
       engine.getResources(f).water = 1000;
     }
 
-    // 5000 ticks (~83s sim time) is enough for Core production to drain + a
-    // builder kit to attach + combatFrameProduction to land under construction.
-    for (let t = 0; t < 5000; t++) engine.stepTick(t, t * 16);
+    // 10000 ticks (~166s sim time) is enough for the robot AI's extended
+    // bootstrap (minPerGatherer=3 now needs 6 gatherers + their Cores before
+    // exiting economy mode) plus a builder + combatFrameProduction under
+    // construction. The wizard slots reach buildUp much sooner but tick
+    // cost dominates the slowest faction.
+    for (let t = 0; t < 10000; t++) engine.stepTick(t, t * 16);
 
     const active = (snapshot as { activeFactions: readonly Faction[] } | null)?.activeFactions ?? [];
     const aiSlots = active.filter((f) => f !== "wizards");

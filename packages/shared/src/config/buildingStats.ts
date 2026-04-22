@@ -11,13 +11,13 @@ import type { Species } from "../types/index.js";
 /** Maps building typeKey → list of unit typeKeys it can produce. */
 export const buildingProduction: Record<string, string[]> = {
   // Robot buildings — each research building IS the production building for its unit type
-  home:                      ["core", "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform"],
-  combatFrameProduction:     ["spinnerPlatform", "spitterPlatform", "largeCombatPlatform"],
-  aerialFrameProduction:     ["probePlatform", "stingerPlatform"],
+  home: ["core", "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform"],
+  combatFrameProduction: ["spinnerPlatform", "spitterPlatform", "largeCombatPlatform"],
+  aerialFrameProduction: ["probePlatform", "stingerPlatform"],
   diplomaticResearchStation: ["infiltrationPlatform"],
-  defenseFrameProduction:    ["wallPlatform"],
+  defenseFrameProduction: ["wallPlatform"],
   // Wizard buildings — all units produced at castle; libraries/special buildings are existence-only unlocks
-  castle:                    ["subject", "surf", "evoker", "illusionist", "enchantress", "dragon", "cleric"],
+  castle: ["subject", "surf", "evoker", "illusionist", "enchantress", "dragon", "cleric"],
 };
 
 /** Unit types that can be ordered to construct a building. */
@@ -52,7 +52,7 @@ export const hidingBuildingConfig = {
  * Gatherers only drop off at buildings in this list for the relevant resource.
  */
 export const resourceDropoffBuildings: Record<"wood" | "water", string[]> = {
-  wood:  ["castle", "home", "logCabin", "woodStorage"],
+  wood: ["castle", "home", "logCabin", "woodStorage"],
   water: ["castle", "home"],
 };
 
@@ -71,15 +71,15 @@ export const buildingRequiresAdjacentWater = new Set(["watermill", "waterExtract
 export const unitBuildingRequirements: Record<string, string> = {
   illusionist: "libraryOfIllusion",
   enchantress: "libraryOfEnchantment",
-  dragon:      "dragonHoard",
-  cleric:      "temple",
+  dragon: "dragonHoard",
+  cleric: "temple",
 };
 
 /** Maps building typeKey → list of researchable item keys available at that building. */
 export const buildingResearch: Record<string, string[]> = {
-  home:                 ["woodToMetal"],
-  libraryOfEvocation:   ["iceBlast", "fieryExplosion", "manaShield"],
-  libraryOfIllusion:    ["phantomDecoy", "invisibility"],
+  home: ["woodToMetal"],
+  libraryOfEvocation: ["iceBlast", "fieryExplosion", "manaShield"],
+  libraryOfIllusion: ["phantomDecoy", "invisibility"],
   libraryOfEnchantment: ["strengthenAlly", "weakenFoe"],
 };
 
@@ -223,9 +223,9 @@ export const wizardBuildingStats: Record<string, BuildingStatBlock> = {
   },
   wizardTower: {
     // Initial guess: defensive tower — high HP, best wizard vision range.
-    hp: 300,
+    hp: 75,
     occupantCapacity: 1,
-    visionRange: 10,
+    visionRange: 8,
     footprintTiles: 1,
     populationSupport: 0,
   },

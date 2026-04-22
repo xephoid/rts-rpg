@@ -115,7 +115,7 @@ const SPECIES_ROLES: Record<Species, FactionRoles> = {
     builder: "surf",
     civilian: "subject",
     gatherers: ["surf"],
-    minPerGatherer: 2,
+    minPerGatherer: 3,
     popSupport: "cottage",
     defense: "wizardTower",
     scout: "surf",
@@ -130,7 +130,7 @@ const SPECIES_ROLES: Record<Species, FactionRoles> = {
     builder: "movableBuildKitPlatform",
     civilian: "core",
     gatherers: ["waterCollectionPlatform", "woodChopperPlatform"],
-    minPerGatherer: 1,
+    minPerGatherer: 3,
     popSupport: "rechargeStation",
     defense: "immobileCombatPlatform",
     scout: "probePlatform",
@@ -214,31 +214,31 @@ type CompEntry = { typeKey: string; weight: number };
  * Evoker-only / Spinner+Spitter-only and waves grow richer as tech comes online.
  */
 const WIZARD_ARMY_COMPOSITION: readonly CompEntry[] = [
-  { typeKey: "evoker",      weight: 60 },
+  { typeKey: "evoker", weight: 60 },
   { typeKey: "enchantress", weight: 15 },
-  { typeKey: "cleric",      weight: 15 },
-  { typeKey: "dragon",      weight: 10 },
+  { typeKey: "cleric", weight: 15 },
+  { typeKey: "dragon", weight: 10 },
 ];
 
 const WIZARD_TURTLE_COMPOSITION: readonly CompEntry[] = [
-  { typeKey: "evoker",      weight: 50 },
-  { typeKey: "cleric",      weight: 30 },
+  { typeKey: "evoker", weight: 50 },
+  { typeKey: "cleric", weight: 30 },
   { typeKey: "enchantress", weight: 20 },
 ];
 
 const ROBOT_ARMY_COMPOSITION: readonly CompEntry[] = [
-  { typeKey: "spitterPlatform",     weight: 48 },
-  { typeKey: "spinnerPlatform",     weight: 28 },
+  { typeKey: "spitterPlatform", weight: 48 },
+  { typeKey: "spinnerPlatform", weight: 28 },
   { typeKey: "largeCombatPlatform", weight: 19 },
   // Low-weight anti-air / mobility pick. Produced at Aerial Frame Production,
   // gated behind a separate tech building from the main combat platforms.
-  { typeKey: "stingerPlatform",     weight: 5 },
+  { typeKey: "stingerPlatform", weight: 5 },
 ];
 
 const ROBOT_TURTLE_COMPOSITION: readonly CompEntry[] = [
-  { typeKey: "spinnerPlatform",     weight: 40 },
-  { typeKey: "spitterPlatform",     weight: 35 },
-  { typeKey: "wallPlatform",        weight: 15 },
+  { typeKey: "spinnerPlatform", weight: 40 },
+  { typeKey: "spitterPlatform", weight: 35 },
+  { typeKey: "wallPlatform", weight: 15 },
   { typeKey: "largeCombatPlatform", weight: 10 },
 ];
 
@@ -337,10 +337,10 @@ export class MilitaryAI {
 
     // Combat production + rally/attack.
     switch (this.mode) {
-      case "economy":  break;                           // no combat production while bootstrapping
-      case "buildUp":  this._buildUpMode(engine, ctx); break;
-      case "push":     this._pushMode(engine, ctx); break;
-      case "turtle":   this._turtleMode(engine, ctx); break;
+      case "economy": break;                           // no combat production while bootstrapping
+      case "buildUp": this._buildUpMode(engine, ctx); break;
+      case "push": this._pushMode(engine, ctx); break;
+      case "turtle": this._turtleMode(engine, ctx); break;
     }
 
     if (this.species === "robots") {
@@ -663,8 +663,8 @@ export class MilitaryAI {
       //    pipeline can't permanently lock out the builder. Without a builder, nothing
       //    else in the base ever gets constructed.
       if (!hasBuilder &&
-          !_isQueuedIn(h, roles.builder) &&
-          _totalQueued(h) < PROD_QUEUE_DEPTH) {
+        !_isQueuedIn(h, roles.builder) &&
+        _totalQueued(h) < PROD_QUEUE_DEPTH) {
         engine.issueProductionOrder(h.id, roles.builder);
       }
       // 3. Thin Core pipeline fills remaining slots up to PROD_QUEUE_DEPTH - 1,
@@ -830,14 +830,23 @@ export class MilitaryAI {
     for (const { factory, entries } of buckets.values()) {
       let queued = _totalQueued(factory);
       const queuedThisTick: string[] = [];
+      // Track typeKeys the engine rejected this tick so we don't keep picking
+      // them via `_pickCompositionUnit` (the composition picker is deterministic
+      // for fixed counts, so a rejected type would be picked again and again
+      // until the loop exited). Dropping the typeKey from the picker's
+      // entry list forces the next-best choice. Happens when pop cap blocks
+      // a wizard unit, a Dragon hits the Hoard limit, resources are tight,
+      // etc. — reject on one unit type should NOT stop queuing the others.
+      const rejected = new Set<string>();
       while (queued < PROD_QUEUE_DEPTH) {
-        const pick = _pickCompositionUnit(entries, counts);
+        const available = entries.filter((e) => !rejected.has(e.typeKey));
+        if (available.length === 0) break;
+        const pick = _pickCompositionUnit(available, counts);
         if (!pick) break;
-        // Engine returns false when the order was silently rejected
-        // (pop cap, resource shortage, queue-full, prereq missing, etc.).
-        // Break here instead of spinning — the same reject reason almost
-        // always applies to the next pick too, and we'll retry next tick.
-        if (!engine.issueProductionOrder(factory.id, pick)) break;
+        if (!engine.issueProductionOrder(factory.id, pick)) {
+          rejected.add(pick);
+          continue;
+        }
         counts[pick] = (counts[pick] ?? 0) + 1;
         queuedThisTick.push(pick);
         queued++;
