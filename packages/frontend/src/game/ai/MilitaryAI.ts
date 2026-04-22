@@ -217,9 +217,12 @@ const WIZARD_TURTLE_COMPOSITION: readonly CompEntry[] = [
 ];
 
 const ROBOT_ARMY_COMPOSITION: readonly CompEntry[] = [
-  { typeKey: "spitterPlatform",     weight: 50 },
-  { typeKey: "spinnerPlatform",     weight: 30 },
-  { typeKey: "largeCombatPlatform", weight: 20 },
+  { typeKey: "spitterPlatform",     weight: 48 },
+  { typeKey: "spinnerPlatform",     weight: 28 },
+  { typeKey: "largeCombatPlatform", weight: 19 },
+  // Low-weight anti-air / mobility pick. Produced at Combat Research Station along
+  // with the Large Combat Platform, so it comes online with the same tech gate.
+  { typeKey: "stingerPlatform",     weight: 5 },
 ];
 
 const ROBOT_TURTLE_COMPOSITION: readonly CompEntry[] = [

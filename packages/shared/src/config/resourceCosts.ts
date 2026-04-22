@@ -49,6 +49,7 @@ export const robotUnitCosts: Record<string, UnitCost> = {
   largeCombatPlatform: { wood: 75, water: 38, productionTimeSec: 30 },
   probePlatform: { wood: 20, water: 10, productionTimeSec: 14 },
   wallPlatform: { wood: 60, water: 0, productionTimeSec: 20 },
+  stingerPlatform: { wood: 35, water: 18, productionTimeSec: 5 }, // Initial guess: Spinner parity
 };
 
 // ── Wizard unit costs ─────────────────────────────────────────────────────────

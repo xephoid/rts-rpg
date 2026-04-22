@@ -25,7 +25,7 @@ export const buildingProduction = {
     // Robot buildings — each research building IS the production building for its unit type
     home: ["core", "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform"],
     combatFrameProduction: ["spinnerPlatform", "spitterPlatform"],
-    combatResearchStation: ["largeCombatPlatform"],
+    combatResearchStation: ["largeCombatPlatform", "stingerPlatform"],
     diplomaticResearchStation: ["infiltrationPlatform", "probePlatform"],
     defensiveResearchStation: ["wallPlatform"],
     // Wizard buildings — all units produced at castle; libraries/special buildings are existence-only unlocks

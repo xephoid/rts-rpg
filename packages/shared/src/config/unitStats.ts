@@ -201,6 +201,23 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     capacity: 0,
     attackIntervalSec: 2.5, // Initial guess
   },
+  stingerPlatform: {
+    // Initial guess: flying melee skirmisher — Spinner parity stat-for-stat, but
+    // airborne so it ignores terrain blocks and can brawl both ground + other flyers.
+    hpWood: 70,
+    hpMetal: 110,
+    damage: 18,
+    attackRange: 1,
+    sightRange: 5, // Initial guess
+    speed: 5.0,
+    charisma: 1,
+    armorWood: 2,
+    armorMetal: 10,
+    capacity: 0,
+    attackIntervalSec: 0.8, // Initial guess: fast attacker
+    flying: true,
+    canAttackAir: true,
+  },
 };
 
 // ── Wizard units ─────────────────────────────────────────────────────────────
@@ -369,6 +386,7 @@ export const unitRoles: Record<string, UnitRole> = {
   largeCombatPlatform: "tank",
   probePlatform: "support",
   wallPlatform: "tank",
+  stingerPlatform: "combat",
   // Wizard units
   archmage: "hero",
   surf: "spy",

@@ -40,6 +40,7 @@ export const robotUnitAssets: Record<string, string> = {
   largeCombatPlatform: "/robot/units/large_combat_platform.png",
   probePlatform: "/robot/units/probe_platform.png",
   wallPlatform: "/robot/units/wall_platform.png",
+  stingerPlatform: "/robot/units/stinger_platform.png",
 };
 
 // Robot unit icons (UI — used by React HUD components)
