@@ -273,3 +273,151 @@ describe("build site validation vs occupied tiles", () => {
     expect(buildingsAfter).toBe(buildingsBefore);
   });
 });
+
+describe("AI fragility — production order return value", () => {
+  it("issueProductionOrder returns true on success and false on queue-full / insufficient resources", () => {
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+    const castle = engine.entities.buildingsByFaction("wizards").find((b) => b.typeKey === "castle")!;
+    engine.getResources("wizards").wood = 10000;
+    engine.getResources("wizards").water = 10000;
+
+    // Fill the queue to the engine's 5-item cap.
+    const succeeded: boolean[] = [];
+    for (let i = 0; i < 5; i++) {
+      succeeded.push(engine.issueProductionOrder(castle.id, "subject"));
+    }
+    expect(succeeded.every((b) => b)).toBe(true);
+
+    // 6th item should reject silently — now it surfaces as a false return.
+    const over = engine.issueProductionOrder(castle.id, "subject");
+    expect(over).toBe(false);
+  });
+
+  it("issueProductionOrder returns false when resources are insufficient", () => {
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+    const castle = engine.entities.buildingsByFaction("wizards").find((b) => b.typeKey === "castle")!;
+    engine.getResources("wizards").wood = 0;
+    engine.getResources("wizards").water = 0;
+    const ok = engine.issueProductionOrder(castle.id, "subject");
+    expect(ok).toBe(false);
+  });
+});
+
+describe("AI fragility — occupant eviction finds tiles beyond radius 1", () => {
+  it("units inside a dying building land on passable tiles even when the immediate ring is crowded", () => {
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+
+    // Place a wizard tower in a clear area so we can control its surroundings.
+    const twStats = wizardBuildingStats.wizardTower!;
+    const tower = new BuildingEntity({
+      faction: "wizards",
+      typeKey: "wizardTower",
+      position: { x: 30, y: 30 },
+      stats: {
+        maxHp: twStats.hp, damage: 0, attackRange: 0,
+        sightRange: twStats.visionRange, speed: 0, charisma: 0, armor: 0,
+        capacity: twStats.occupantCapacity,
+      },
+      constructionTicks: 0,
+    });
+    tower.state = { kind: "operational" };
+    engine.entities.add(tower);
+
+    // Garrisoned unit.
+    const eStats = wizardUnitStats.evoker!;
+    const evoker = new UnitEntity({
+      faction: "wizards",
+      typeKey: "evoker",
+      position: { x: 30, y: 30 },
+      stats: {
+        maxHp: eStats.hp, damage: eStats.damage,
+        attackRange: eStats.attackRange, sightRange: eStats.sightRange,
+        speed: eStats.speed, charisma: eStats.charisma,
+        armor: eStats.armor, capacity: eStats.capacity,
+      },
+    });
+    evoker.state = { kind: "garrisoned", buildingId: tower.id };
+    evoker.garrisonedBuildingId = tower.id;
+    tower.garrisonedUnitId = evoker.id;
+    engine.entities.add(evoker);
+
+    // Surround the tower's 1×1 footprint with 8 units so the immediate ring
+    // is fully occupied — the expanded-radius search must find a tile further
+    // out rather than stranding the evoker on a blocked fallback.
+    const sStats = wizardUnitStats.surf!;
+    const crowd = [
+      { x: 29, y: 29 }, { x: 30, y: 29 }, { x: 31, y: 29 },
+      { x: 29, y: 30 }, { x: 31, y: 30 },
+      { x: 29, y: 31 }, { x: 30, y: 31 }, { x: 31, y: 31 },
+    ];
+    for (const pos of crowd) {
+      engine.entities.add(new UnitEntity({
+        faction: "wizards",
+        typeKey: "surf",
+        position: pos,
+        stats: {
+          maxHp: sStats.hp, damage: sStats.damage,
+          attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+          speed: sStats.speed, charisma: sStats.charisma,
+          armor: sStats.armor, capacity: sStats.capacity,
+        },
+      }));
+    }
+
+    // Kill the tower — eviction must place the evoker on a passable,
+    // non-occupied tile in ring 2 or further.
+    tower.stats.hp = 0;
+    engine.stepTick(0, 0);
+
+    expect(evoker.state.kind).toBe("idle");
+    const ex = Math.round(evoker.position.x);
+    const ey = Math.round(evoker.position.y);
+    // Not on any of the 8 adjacent tiles that the ring-1-only code would have
+    // fallen back to (specifically not the old {px+1, py} fallback which sat
+    // on a crowd tile).
+    const onCrowd = crowd.some((c) => c.x === ex && c.y === ey);
+    expect(onCrowd).toBe(false);
+  });
+});
+
+describe("AI fragility — push mode short-circuits when all enemies are treaty-locked", () => {
+  it("does not flip inAttack or issue wave when every opposing active faction is treaty-bound", () => {
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards", onTick: () => {},
+    });
+    engine.setMet("wizards", "robots");
+
+    // Give the robot AI an army past the threshold so push would normally fire.
+    const sStats = robotUnitStats.spitterPlatform!;
+    for (let i = 0; i < 10; i++) {
+      const u = new UnitEntity({
+        faction: "robots",
+        typeKey: "spitterPlatform",
+        position: { x: 50 + (i % 5), y: 50 + Math.floor(i / 5) },
+        stats: {
+          maxHp: sStats.hpWood, damage: sStats.damage,
+          attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+          speed: sStats.speed, charisma: sStats.charisma,
+          armor: sStats.armorWood, capacity: sStats.capacity,
+        },
+      });
+      u.attachedCoreId = "fake"; // satisfy the "needs Core" gate
+      engine.entities.add(u);
+    }
+
+    // Sign a bilateral non-combat treaty with the only opposing faction.
+    engine.issueProposeDiplomaticAction("wizards", "robots", "nonCombat");
+    const pending = engine.getPendingProposals()[0]!;
+    engine.issueRespondToProposal(pending.id, true);
+    expect(engine.hasNonCombatTreaty("wizards", "robots")).toBe(true);
+
+    // Run several reaction cycles (60 ticks each). Treaty-locked push must not
+    // ever put a robot unit into `attacking` state against a wizard target.
+    for (let t = 0; t < 400; t++) engine.stepTick(t, t * 16);
+
+    const anyAttackingWizards = engine.entities.unitsByFaction("robots").some(
+      (u) => u.state.kind === "attacking",
+    );
+    expect(anyAttackingWizards).toBe(false);
+  });
+});

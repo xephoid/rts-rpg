@@ -628,31 +628,39 @@ export class GameEngine {
     void targetId;
   }
 
-  issueProductionOrder(buildingId: string, unitTypeKey: string): void {
+  /**
+   * Enqueue a unit for production at the given building. Returns `true` when
+   * the order landed in the queue (or started producing immediately), `false`
+   * for any silent-reject path (not operational, queue full, prereq missing,
+   * cost / pop / hoard gates, etc.). The AI inspects the return value to
+   * avoid re-issuing the same doomed order every reaction tick when the home
+   * or combat factory is capped.
+   */
+  issueProductionOrder(buildingId: string, unitTypeKey: string): boolean {
     const entity = this.entities.get(buildingId);
-    if (!entity || entity.kind !== "building") return;
+    if (!entity || entity.kind !== "building") return false;
     const building = entity as BuildingEntity;
-    if (!building.isOperational) return;
-    if (building.state.kind === "researching") return;
+    if (!building.isOperational) return false;
+    if (building.state.kind === "researching") return false;
 
     // Queue cap: max 5 items total (active + queued)
     const activeCount = building.state.kind === "producing" ? 1 : 0;
-    if (activeCount + building.productionQueue.length >= 5) return;
+    if (activeCount + building.productionQueue.length >= 5) return false;
 
     // Gate: require prerequisite building to be operational
     const reqBuildingType = unitBuildingRequirements[unitTypeKey];
     if (reqBuildingType) {
       const hasReq = this.entities.buildingsByFaction(building.faction)
         .some((b) => b.typeKey === reqBuildingType && b.isOperational);
-      if (!hasReq) return;
+      if (!hasReq) return false;
     }
 
     const costs = this._unitCostsFor(building.faction);
     const cost = costs[unitTypeKey];
-    if (!cost) return;
+    if (!cost) return false;
 
     const res = this.resources[building.faction];
-    if (res.wood < cost.wood || res.water < cost.water) return;
+    if (res.wood < cost.wood || res.water < cost.water) return false;
 
     const pop = this._computePopulation();
     const { count, cap } = pop[building.faction];
@@ -666,7 +674,7 @@ export class GameEngine {
       pendingPop += b.productionQueue.filter(consumesPop).length;
     }
     // Also skip the pop-cap check entirely when the unit being queued doesn't consume pop
-    if (cap > 0 && consumesPop(unitTypeKey) && count + pendingPop >= cap) return;
+    if (cap > 0 && consumesPop(unitTypeKey) && count + pendingPop >= cap) return false;
 
     // Dragon Hoard gate: each operational Hoard supports exactly one Dragon.
     // Count per-faction so a 4/6-player match with multiple wizard slots doesn't
@@ -681,7 +689,7 @@ export class GameEngine {
         if (b.state.kind === "producing" && b.state.unitTypeKey === "dragon") queuedDragons++;
         queuedDragons += b.productionQueue.filter((k) => k === "dragon").length;
       }
-      if (liveDragons + queuedDragons >= hoardCount) return;
+      if (liveDragons + queuedDragons >= hoardCount) return false;
     }
 
     // Deduct resources at enqueue time
@@ -699,6 +707,7 @@ export class GameEngine {
       // Already producing — enqueue
       building.productionQueue.push(unitTypeKey);
     }
+    return true;
   }
 
   issueCancelProduction(buildingId: string): void {
@@ -862,19 +871,13 @@ export class GameEngine {
     const towerEntity = this.entities.get(unit.state.buildingId);
     const tower = towerEntity?.kind === "building" ? towerEntity as BuildingEntity : null;
 
-    const px = Math.round(unit.position.x);
-    const py = Math.round(unit.position.y);
-    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
-                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
-    let ejectPos: Vec2 = { x: px + 1, y: py };
-    for (const d of dirs) {
-      const tx = px + d.x;
-      const ty = py + d.y;
-      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, unit.id, false)) {
-        ejectPos = { x: tx, y: ty };
-        break;
-      }
-    }
+    // Use the building's position as the anchor when we have it — the unit's
+    // position is synced to the tower each tick so either works, but when the
+    // tower's being destroyed the position may already be stale. Falls back
+    // to the unit's last-known tile for safety.
+    const anchor = tower ? tower.position : unit.position;
+    const ejectPos = this._findEjectTile(anchor, unit.id)
+      ?? { x: Math.round(anchor.x), y: Math.round(anchor.y) };
 
     if (tower) this._releaseFromBuilding(unit, tower, minUnitHp);
     unit.position = ejectPos;
@@ -922,19 +925,8 @@ export class GameEngine {
     const platform = platformEntity?.kind === "building" ? (platformEntity as BuildingEntity) : null;
 
     const anchor = platform ? platform.position : core.position;
-    const px = Math.round(anchor.x);
-    const py = Math.round(anchor.y);
-    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
-                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
-    let ejectPos: Vec2 = { x: px + 1, y: py };
-    for (const d of dirs) {
-      const tx = px + d.x;
-      const ty = py + d.y;
-      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, core.id, false)) {
-        ejectPos = { x: tx, y: ty };
-        break;
-      }
-    }
+    const ejectPos = this._findEjectTile(anchor, core.id)
+      ?? { x: Math.round(anchor.x), y: Math.round(anchor.y) };
 
     if (platform) this._releaseFromBuilding(core, platform, minUnitHp);
     core.position = ejectPos;
@@ -1565,13 +1557,14 @@ export class GameEngine {
               ? { x: Math.round(blocker.position.x), y: Math.round(blocker.position.y) }
               : null;
             this._replanUnit(unit, avoid);
-            // If replan still left us blocked on the same next tile (narrow corridor),
-            // nudge ourselves aside so the other unit can pass.
-            const ns = unit.state;
-            const stillStuck = (ns.kind === state.kind) &&
-              "path" in ns && Array.isArray(ns.path) && ns.path[0] &&
-              ns.path[0].x === next.x && ns.path[0].y === next.y;
-            if (stillStuck) this._nudgeUnit(unit);
+            // Previously called `_nudgeUnit(unit)` here when replan still
+            // routed through the blocker's tile — the nudge clobbered the
+            // unit's task state (gatherMove/buildMove/attacking → moving) to
+            // step one tile aside. In the common case (moving blocker) the
+            // blocker clears within a tick or two and the wait is cheap, and
+            // losing in-progress work was a net-negative trade. Drop the
+            // nudge here; accept one tick of stall in the narrow-corridor
+            // head-on case.
           }
           return;
         }
@@ -1800,16 +1793,29 @@ export class GameEngine {
   /** Scan the 8-neighborhood of `buildingPos` for a passable tile that is not already
    *  occupied by `excludeUnitId`. Returns null if no such tile exists within the
    *  immediate ring. Used by hide-exit and spy-forced-eject paths. */
+  /**
+   * Find a free tile near a building anchor to eject an occupant onto.
+   * Expands outward in concentric Chebyshev rings up to `EJECT_MAX_RADIUS` so
+   * dense bases with blocked-in buildings still evict survivors cleanly
+   * instead of stranding them on a blocked tile with the old `{px+1, py}`
+   * fallback. Returns null only when nothing within the cap is free; callers
+   * should last-resort-place at the anchor itself (passable post-unblock).
+   */
   private _findEjectTile(buildingPos: Vec2, excludeUnitId: string): Vec2 | null {
+    const EJECT_MAX_RADIUS = 4;
     const px = Math.round(buildingPos.x);
     const py = Math.round(buildingPos.y);
-    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
-                  { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 }];
-    for (const d of dirs) {
-      const tx = px + d.x;
-      const ty = py + d.y;
-      if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, excludeUnitId, false)) {
-        return { x: tx, y: ty };
+    for (let r = 1; r <= EJECT_MAX_RADIUS; r++) {
+      // Walk the perimeter of the r-ring (tiles at exactly Chebyshev distance r).
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+          const tx = px + dx;
+          const ty = py + dy;
+          if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, excludeUnitId, false)) {
+            return { x: tx, y: ty };
+          }
+        }
       }
     }
     return null;

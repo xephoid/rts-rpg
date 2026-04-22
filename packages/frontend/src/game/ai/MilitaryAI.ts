@@ -50,7 +50,7 @@ export interface AIEngineInterface {
   getPopulation(faction: Faction): { count: number; cap: number };
   isValidBuildSite(faction: Faction, typeKey: string, pos: Vec2): boolean;
   issueGatherOrder(unitId: string, depositId: string): void;
-  issueProductionOrder(buildingId: string, typeKey: string): void;
+  issueProductionOrder(buildingId: string, typeKey: string): boolean;
   issueBuildOrder(unitId: string, typeKey: string, pos: Vec2): void;
   issueMoveOrder(unitId: string, target: Vec2): void;
   issueGroupMoveOrder(ids: string[], target: Vec2): void;
@@ -739,15 +739,29 @@ export class MilitaryAI {
 
   private _pushMode(engine: AIEngineInterface, ctx: Ctx): void {
     this._queueCombatComposition(engine, ctx, this._composition());
-    // Launch wave using the idle army captured in ctx (before any rally order).
-    if (!this.inAttack && ctx.idleArmy.length >= this._attackThreshold(ctx.tick)) {
-      this.inAttack = true;
-      const summary: Record<string, number> = {};
-      for (const u of ctx.idleArmy) summary[u.typeKey] = (summary[u.typeKey] ?? 0) + 1;
-      const composition = Object.entries(summary).map(([k, n]) => `${n}×${k}`).join(", ");
-      this._log(`launching wave (${ctx.idleArmy.length} units: ${composition})`);
-      _issueAttackWave(engine, ctx.idleArmy, ctx.enemies);
+    if (this.inAttack) return;
+    if (ctx.idleArmy.length < this._attackThreshold(ctx.tick)) return;
+
+    // Short-circuit if every active opposing faction sits behind a non-combat
+    // treaty. `_issueAttackWave` would filter them all out, find no targets,
+    // no units would enter 'attacking', `inAttack` would flip back to false
+    // next tick, and we'd burn every reaction loop re-launching empty waves.
+    // Holding here lets the economy pass run normally and keeps combat units
+    // at rally until diplomacy changes or a new un-allied faction appears.
+    const hasOpenEnemy = engine.getActiveFactions().some(
+      (f) => f !== this.faction && !engine.hasNonCombatTreaty(this.faction, f),
+    );
+    if (!hasOpenEnemy) {
+      this._log(`push: all active enemies under non-combat treaty — holding (army=${ctx.idleArmy.length})`);
+      return;
     }
+
+    this.inAttack = true;
+    const summary: Record<string, number> = {};
+    for (const u of ctx.idleArmy) summary[u.typeKey] = (summary[u.typeKey] ?? 0) + 1;
+    const composition = Object.entries(summary).map(([k, n]) => `${n}×${k}`).join(", ");
+    this._log(`launching wave (${ctx.idleArmy.length} units: ${composition})`);
+    _issueAttackWave(engine, ctx.idleArmy, ctx.enemies);
   }
 
   private _turtleMode(engine: AIEngineInterface, ctx: Ctx): void {
@@ -819,7 +833,11 @@ export class MilitaryAI {
       while (queued < PROD_QUEUE_DEPTH) {
         const pick = _pickCompositionUnit(entries, counts);
         if (!pick) break;
-        engine.issueProductionOrder(factory.id, pick);
+        // Engine returns false when the order was silently rejected
+        // (pop cap, resource shortage, queue-full, prereq missing, etc.).
+        // Break here instead of spinning — the same reject reason almost
+        // always applies to the next pick too, and we'll retry next tick.
+        if (!engine.issueProductionOrder(factory.id, pick)) break;
         counts[pick] = (counts[pick] ?? 0) + 1;
         queuedThisTick.push(pick);
         queued++;
