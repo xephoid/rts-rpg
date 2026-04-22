@@ -50,6 +50,8 @@ import {
   HIDEABLE_UNIT_TYPES,
   hidingBuildingConfig,
   ROBOT_PLATFORM_TYPES,
+  CONVERT_CASTER_TYPES,
+  convertConfig,
   uiText,
   diplomacy as diplomacyConfig,
 } from "@neither/shared";
@@ -1081,6 +1083,46 @@ export class GameEngine {
     platform.attackCooldownTicks = Math.round((platformStats?.attackIntervalSec ?? 1.0) * TICKS_PER_SEC);
 
     if (occupant.stats.hp <= 0) this._handleEntityDeath(occupant, platform.id);
+  }
+
+  /**
+   * Convert action — sustained-adjacency ability cast by a leader or civilian
+   * (`CONVERT_CASTER_TYPES`) on an adjacent opposing unit. On order, puts the
+   * caster into `converting` state; `_processConverting` runs the success
+   * check after `convertConfig.baseDurationTicks` of continuous adjacency.
+   * Leaders (`cannotBeConverted`) are immune as targets.
+   */
+  issueConvertOrder(casterId: string, targetId: string): void {
+    const casterEntity = this.entities.get(casterId);
+    if (!casterEntity || casterEntity.kind !== "unit") return;
+    const caster = casterEntity as UnitEntity;
+    if (!CONVERT_CASTER_TYPES.has(caster.typeKey)) return;
+    // Casters must be on the map surface — not mid-hide / mid-attach / shelled.
+    if (caster.state.kind === "platformShell" || caster.state.kind === "garrisoned" ||
+        caster.state.kind === "inPlatform" || caster.state.kind === "hidingInBuilding" ||
+        caster.state.kind === "inEnemyBuilding") return;
+
+    const targetEntity = this.entities.get(targetId);
+    if (!targetEntity || targetEntity.kind !== "unit") return;
+    const target = targetEntity as UnitEntity;
+    if (target.faction === caster.faction) return;
+    if (target.cannotBeConverted) return; // leaders immune
+    if (target.state.kind === "platformShell" || target.state.kind === "garrisoned" ||
+        target.state.kind === "inPlatform" || target.state.kind === "hidingInBuilding" ||
+        target.state.kind === "inEnemyBuilding") return;
+
+    // Adjacency check — Euclidean tile-center distance.
+    const dx = (target.position.x + 0.5) - (caster.position.x + 0.5);
+    const dy = (target.position.y + 0.5) - (caster.position.y + 0.5);
+    if (Math.hypot(dx, dy) > convertConfig.adjacencyRangeTiles) return;
+
+    this._releaseDepositOccupancy(caster);
+    caster.state = {
+      kind: "converting",
+      targetId: target.id,
+      progressTicks: 0,
+      totalTicks: convertConfig.baseDurationTicks,
+    };
   }
 
   issueBuildOrder(unitId: string, buildingTypeKey: string, topLeft: Vec2): void {
@@ -2420,6 +2462,78 @@ export class GameEngine {
     }
   }
 
+  /**
+   * Advance any unit in the `converting` state one tick. If adjacency or
+   * target validity is broken, drop the caster back to idle. When the
+   * duration elapses, run the charisma vs (hp + level · levelPenalty)
+   * success check — on success the target joins the caster's faction
+   * permanently, its `originalFaction` field is preserved for potential
+   * future revert mechanics, and a convert alert fires.
+   */
+  private _processConverting(): void {
+    for (const caster of this.entities.units()) {
+      if (caster.state.kind !== "converting") continue;
+      if (caster.stats.hp <= 0 || !this.entities.has(caster.id)) continue;
+
+      const { targetId } = caster.state;
+      const targetEntity = this.entities.get(targetId);
+      if (!targetEntity || targetEntity.kind !== "unit") {
+        caster.state = { kind: "idle" };
+        continue;
+      }
+      const target = targetEntity as UnitEntity;
+      if (target.stats.hp <= 0) {
+        caster.state = { kind: "idle" };
+        continue;
+      }
+      // Target must still be on the map surface — if it garrisoned / entered
+      // a platform / hid in a building, the convert contact breaks.
+      if (target.state.kind === "platformShell" || target.state.kind === "garrisoned" ||
+          target.state.kind === "inPlatform" || target.state.kind === "hidingInBuilding" ||
+          target.state.kind === "inEnemyBuilding") {
+        caster.state = { kind: "idle" };
+        continue;
+      }
+      // Target may have changed faction mid-convert (rare — another convert
+      // landed first). Abort cleanly rather than converting our own unit.
+      if (target.faction === caster.faction) {
+        caster.state = { kind: "idle" };
+        continue;
+      }
+
+      // Adjacency check — tile-center Euclidean.
+      const dx = (target.position.x + 0.5) - (caster.position.x + 0.5);
+      const dy = (target.position.y + 0.5) - (caster.position.y + 0.5);
+      if (Math.hypot(dx, dy) > convertConfig.adjacencyRangeTiles) {
+        caster.state = { kind: "idle" };
+        continue;
+      }
+
+      caster.state.progressTicks++;
+      if (caster.state.progressTicks < caster.state.totalTicks) continue;
+
+      // Duration elapsed — run the success check.
+      const casterPower = caster.stats.charisma * convertConfig.charismaMult;
+      const targetResistance = target.stats.hp + target.stats.level * convertConfig.levelPenalty;
+      const success = casterPower >= targetResistance;
+
+      if (success) {
+        const originalFaction = target.faction;
+        target.originalFaction = originalFaction;
+        target.faction = caster.faction;
+        this.giveXp(caster.id, xpRates.convertEnemy);
+        // Alert both sides — loser sees their unit defected, winner sees the pickup.
+        if (this._isPlayerFaction(originalFaction)) {
+          this.onAlert?.(uiText.spy.alertConverted(target.name ?? target.typeKey));
+        }
+        if (this._isPlayerFaction(caster.faction)) {
+          this.onAlert?.(`Converted ${target.typeKey} from ${originalFaction}`);
+        }
+      }
+      caster.state = { kind: "idle" };
+    }
+  }
+
   private _processAutoAggro(tick: number): void {
     if (tick % 10 !== 0) return;
     for (const unit of this.entities.units()) {
@@ -3339,6 +3453,7 @@ export class GameEngine {
     this._processAttacks();
     this._processGarrisonedAttacks();
     this._processImmobileCombatPlatformAttacks();
+    this._processConverting();
     this._processAutoAggro(tick);
     this._processAutoCollection(tick);
     this._processMana();

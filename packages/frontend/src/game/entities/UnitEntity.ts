@@ -13,7 +13,7 @@ export type UnitState =
   | { kind: "gathering"; depositId: string }
   | { kind: "buildMove"; buildingId: string; path: Vec2[]; yieldTicks: number }
   | { kind: "constructing"; buildingId: string }
-  | { kind: "converting"; targetId: string; ticksElapsed: number }
+  | { kind: "converting"; targetId: string; progressTicks: number; totalTicks: number }
   | { kind: "attachMove"; platformId: string; path: Vec2[]; yieldTicks: number }
   | { kind: "following"; targetId: string; path: Vec2[]; yieldTicks: number }
   | { kind: "garrisonMove"; buildingId: string; path: Vec2[]; yieldTicks: number }

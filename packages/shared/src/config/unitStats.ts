@@ -404,6 +404,35 @@ export const namedLeaders = {
   robots: { typeKey: "motherboard" as const, name: "Motherboard" },
 } as const;
 
+/** Unit typeKeys allowed to initiate a Convert action. Spec §7 scopes this to
+ *  leaders and civilians — high-charisma, non-combat units. Combat platforms
+ *  and spy-specialised units can't convert (Illusionist has its own
+ *  convert-in-building mechanic which is separate from this). */
+export const CONVERT_CASTER_TYPES = new Set<string>([
+  "archmage",    // wizard leader
+  "motherboard", // robot leader
+  "subject",     // wizard civilian
+  "core",        // robot civilian
+]);
+
+/**
+ * Convert-action tuning. Convert is a sustained-adjacency ability: the caster
+ * parks next to the target for `baseDurationTicks`, after which a charisma
+ * vs HP+level check decides success. Values are Initial guesses — expect
+ * playtest tuning.
+ */
+export const convertConfig = {
+  /** Max Euclidean tile distance between caster + target during the convert. */
+  adjacencyRangeTiles: 1.5,
+  /** Sustained ticks of adjacency before the success check fires. */
+  baseDurationTicks: 60 * 8, // ~8s at 60 ticks/s
+  /** `caster.charisma * charismaMult` is compared against
+   *  `target.hp + target.level * levelPenalty`. Success flips target faction. */
+  charismaMult: 1.0,
+  /** Effective HP penalty added per target level. */
+  levelPenalty: 20,
+};
+
 /**
  * Extra population cap contributed by a unit being alive on the map.
  * Only named leaders or special units need entries here.

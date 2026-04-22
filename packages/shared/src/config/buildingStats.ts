@@ -78,7 +78,7 @@ export const unitBuildingRequirements: Record<string, string> = {
 /** Maps building typeKey → list of researchable item keys available at that building. */
 export const buildingResearch: Record<string, string[]> = {
   home: ["woodToMetal"],
-  libraryOfEvocation: ["iceBlast", "fieryExplosion", "manaShield"],
+  libraryOfEvocation: ["wizardMissiles", "iceBlast", "fieryExplosion", "manaShield"],
   libraryOfIllusion: ["phantomDecoy", "invisibility"],
   libraryOfEnchantment: ["strengthenAlly", "weakenFoe"],
 };
@@ -132,7 +132,7 @@ export const robotBuildingStats: Record<string, BuildingStatBlock> = {
     // (zero Cores); each occupying Core adds immobileCombatPlatformConfig.perCoreVision.
     hp: 350,
     occupantCapacity: 3, // Initial guess: up to 3 Cores may enter to boost effectiveness.
-    visionRange: 4, // Initial guess: base sight. Less than a dedicated Watch Tower.
+    visionRange: 8, // Initial guess: base sight. Less than a dedicated Watch Tower.
     footprintTiles: 1,
     populationSupport: 0,
   },

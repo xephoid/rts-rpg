@@ -13,7 +13,7 @@ export const technologicalVictory = {
   // Initial guess: must research/build all 27 items across both factions.
   // Full item list (all units + buildings from both species, including cross-species):
   requiredItems: [
-    // Robot units (10)
+    // Robot units (11)
     "core",
     "waterCollectionPlatform",
     "woodChopperPlatform",
@@ -24,6 +24,7 @@ export const technologicalVictory = {
     "largeCombatPlatform",
     "probePlatform",
     "wallPlatform",
+    "stingerPlatform", // Added in the combat-frame refactor; must be produced for tech victory.
     // Wizard units (8)
     "archmage",
     "surf",
