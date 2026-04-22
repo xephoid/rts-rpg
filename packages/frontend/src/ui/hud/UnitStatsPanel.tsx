@@ -1,4 +1,4 @@
-import { unitPortraitPath, unitSpritePath } from "@neither/shared";
+import { unitSpritePath } from "@neither/shared";
 import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
 import styles from "./UnitStatsPanel.module.css";
@@ -51,7 +51,7 @@ export function UnitStatsPanel() {
             {[...groups].map(([typeKey, count]) => (
               <div key={typeKey} className={styles.groupRow}>
                 <img
-                  src={unitPortraitPath(faction, typeKey)}
+                  src={unitSpritePath(faction, typeKey)}
                   className={styles.groupPortrait}
                   alt={formatTypeKey(typeKey)}
                   onError={(e) => { e.currentTarget.style.display = "none"; }}
@@ -93,7 +93,7 @@ export function UnitStatsPanel() {
       <div className={styles.content}>
         <div className={styles.entityHeader}>
           <img
-            src={unitPortraitPath(entity.faction, entity.typeKey)}
+            src={unitSpritePath(entity.faction, entity.typeKey)}
             className={styles.entityPortrait}
             alt={formatTypeKey(entity.typeKey)}
             onError={(e) => { e.currentTarget.style.display = "none"; }}
@@ -289,7 +289,7 @@ export function UnitStatsPanel() {
                   {entity.productionQueue.map((typeKey, i) => (
                     <img
                       key={i}
-                      src={unitPortraitPath(entity.faction, typeKey)}
+                      src={unitSpritePath(entity.faction, typeKey)}
                       className={styles.queueIcon}
                       alt={formatTypeKey(typeKey)}
                       onError={(e) => { e.currentTarget.style.display = "none"; }}

@@ -1,15 +1,3 @@
-/**
- * Resolve a unit portrait (icon) path for use in selection panels.
- * Lives here (not renderer/assets.ts) so /ui components can import it without
- * violating ESLint import boundary rules.
- * Robot icons are not fully populated yet — callers should handle missing images gracefully.
- */
-export declare function unitPortraitPath(faction: "wizards" | "robots", typeKey: string): string;
-/**
- * Resolve a unit sprite path for use in production buttons.
- * These are the in-game unit images (side/isometric view sprites).
- */
-export declare function unitSpritePath(faction: "wizards" | "robots", typeKey: string): string;
 /** Maps building typeKey → list of unit typeKeys it can produce. */
 export declare const buildingProduction: Record<string, string[]>;
 /** Unit types that can be ordered to construct a building. */
@@ -47,8 +35,6 @@ export declare const unitBuildingRequirements: Record<string, string>;
 export declare const buildingResearch: Record<string, string[]>;
 /** Buildings a builder can construct. Includes additional main bases (spec: no limit on Castles/Homes). */
 export declare const factionBuildableBuildings: Record<"wizards" | "robots", string[]>;
-/** Portrait path for buildings — for Build panel buttons and selection panel. */
-export declare function buildingPortraitPath(faction: "wizards" | "robots", typeKey: string): string;
 export type BuildingStatBlock = {
     hp: number;
     occupantCapacity: number;

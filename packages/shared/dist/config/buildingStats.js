@@ -1,25 +1,10 @@
 // Building stats for all building types.
 // Values marked "Initial guess" — update to "Confirmed" after playtesting sign-off.
-/**
- * Resolve a unit portrait (icon) path for use in selection panels.
- * Lives here (not renderer/assets.ts) so /ui components can import it without
- * violating ESLint import boundary rules.
- * Robot icons are not fully populated yet — callers should handle missing images gracefully.
- */
-export function unitPortraitPath(faction, typeKey) {
-    return faction === "wizards"
-        ? `/wizard/icons/${typeKey}.png`
-        : `/robot/icons/${typeKey}.png`;
-}
-/**
- * Resolve a unit sprite path for use in production buttons.
- * These are the in-game unit images (side/isometric view sprites).
- */
-export function unitSpritePath(faction, typeKey) {
-    return faction === "wizards"
-        ? `/wizard/units/${typeKey}.png`
-        : `/robot/units/${typeKey}.png`;
-}
+//
+// NOTE: `unitSpritePath` / `buildingSpritePath` live in `./assets.ts`. Use those
+// when you need an image URL for a typeKey — they consult the canonical asset
+// manifest instead of string-templating (which would silently break for any
+// multi-word robot typeKey whose actual file is snake_case).
 /** Maps building typeKey → list of unit typeKeys it can produce. */
 export const buildingProduction = {
     // Robot buildings — each research building IS the production building for its unit type
@@ -99,12 +84,6 @@ export const factionBuildableBuildings = {
         "defensiveResearchStation", "thirdSpace",
     ],
 };
-/** Portrait path for buildings — for Build panel buttons and selection panel. */
-export function buildingPortraitPath(faction, typeKey) {
-    return faction === "wizards"
-        ? `/wizard/buildings/${typeKey}.png`
-        : `/robot/buildings/${typeKey}.png`;
-}
 // ── Robot buildings ───────────────────────────────────────────────────────────
 export const robotBuildingStats = {
     home: {

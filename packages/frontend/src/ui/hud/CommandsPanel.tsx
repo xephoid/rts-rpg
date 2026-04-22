@@ -5,11 +5,10 @@ import {
   robotUnitCosts,
   wizardUnitCosts,
   unitSpritePath,
-  unitPortraitPath,
   BUILDER_UNIT_TYPES,
   factionBuildableBuildings,
   unitBuildingRequirements,
-  buildingPortraitPath,
+  buildingSpritePath,
   robotBuildingCosts,
   wizardBuildingCosts,
   robotBuildingStats,
@@ -164,7 +163,7 @@ export function CommandsPanel() {
                   }
                 >
                   <img
-                    src={unitPortraitPath(entity.faction, typeKey)}
+                    src={unitSpritePath(entity.faction, typeKey)}
                     className={styles.prodIcon}
                     alt={formatTypeKey(typeKey)}
                     onError={(e) => { e.currentTarget.style.display = "none"; }}
@@ -326,7 +325,7 @@ export function CommandsPanel() {
                     } : undefined}
                   >
                     <img
-                      src={buildingPortraitPath(activeFaction as "wizards" | "robots", typeKey)}
+                      src={buildingSpritePath(activeFaction as "wizards" | "robots", typeKey)}
                       className={styles.prodIcon}
                       alt={formatTypeKey(typeKey)}
                       onError={(e) => { e.currentTarget.style.display = "none"; }}
