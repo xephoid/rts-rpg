@@ -234,6 +234,8 @@ export class GameEngine {
       isNamed: true,
       name: namedLeaders.wizards.name,
       cannotBeConverted: archmageStats.cannotBeConverted ?? false,
+      isFlying: archmageStats.flying ?? false,
+      canAttackAir: archmageStats.canAttackAir ?? false,
     });
     this.entities.add(archmage);
 
@@ -298,6 +300,8 @@ export class GameEngine {
       isNamed: true,
       name: namedLeaders.robots.name,
       cannotBeConverted: motherboardStats.cannotBeConverted ?? false,
+      isFlying: motherboardStats.flying ?? false,
+      canAttackAir: motherboardStats.canAttackAir ?? false,
     });
     motherboard.materialType = "wood";
     this.entities.add(motherboard);
