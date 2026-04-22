@@ -366,17 +366,21 @@ export class GameRenderer {
   }
 
   private _getFootprint(entity: EntitySnapshot): number {
+    // Pick the stats table by species, not by the literal "wizards"/"robots"
+    // slot id — a faction in slot f3/f4/f5/f6 has its own species and would
+    // otherwise fall through to the wrong table (a castle in slot f3 would
+    // render as the default 2×2 footprint instead of 4×4). The species map
+    // is captured fresh each `render()` tick.
+    const species = this.lastFactionSpecies?.[entity.faction] ?? "wizards";
     if (entity.kind === "building") {
-      const stats =
-        entity.faction === "wizards"
-          ? wizardBuildingStats[entity.typeKey]
-          : robotBuildingStats[entity.typeKey];
+      const stats = species === "wizards"
+        ? wizardBuildingStats[entity.typeKey]
+        : robotBuildingStats[entity.typeKey];
       return stats?.footprintTiles ?? 2;
     }
-    const unitStats =
-      entity.faction === "wizards"
-        ? wizardUnitStats[entity.typeKey]
-        : robotUnitStats[entity.typeKey];
+    const unitStats = species === "wizards"
+      ? wizardUnitStats[entity.typeKey]
+      : robotUnitStats[entity.typeKey];
     return unitStats?.footprintTiles ?? 1;
   }
 
@@ -1268,8 +1272,10 @@ export class GameRenderer {
             if (issued > 0) return;
           }
         }
-        // Move toward / surround friendly building
-        const fp = hitEntity.faction === "wizards"
+        // Move toward / surround friendly building. Species check — slot
+        // literal would be wrong for f3-f6 (see _getFootprint).
+        const hitSpecies = this.lastFactionSpecies?.[hitEntity.faction] ?? "wizards";
+        const fp = hitSpecies === "wizards"
           ? (wizardBuildingStats[hitEntity.typeKey]?.footprintTiles ?? 1)
           : (robotBuildingStats[hitEntity.typeKey]?.footprintTiles ?? 1);
         const cx = hitEntity.position.x + fp / 2;
