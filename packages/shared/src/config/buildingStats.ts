@@ -78,7 +78,7 @@ export const unitBuildingRequirements: Record<string, string> = {
 /** Maps building typeKey → list of researchable item keys available at that building. */
 export const buildingResearch: Record<string, string[]> = {
   home: ["woodToMetal"],
-  libraryOfEvocation: ["wizardMissiles", "iceBlast", "fieryExplosion", "manaShield"],
+  libraryOfEvocation: ["iceBlast", "fieryExplosion", "manaShield"],
   libraryOfIllusion: ["phantomDecoy", "invisibility"],
   libraryOfEnchantment: ["strengthenAlly", "weakenFoe"],
 };

@@ -160,6 +160,51 @@ export function DiplomacyPanel() {
             >
               {uiText.diplomacy.proposeResourceRequest} (50 wood)
             </button>
+            {/* Request Unit — surface every visible (fog-revealed) unit of the
+                target's faction as a clickable row. Sends a unitRequest
+                proposal for that specific instance; on accept, the unit
+                transfers to the player's faction. Hidden units (in platform,
+                garrison, cottage, covered by fog) are filtered out. */}
+            {(() => {
+              const viewerFog = gameState.fog[activeFaction];
+              const fogW = viewerFog?.width ?? 0;
+              const fogData = viewerFog?.data;
+              const visibleAllyUnits = gameState.entities.filter((e) => {
+                if (e.kind !== "unit" || e.faction !== target) return false;
+                if (e.isShell || e.garrisoned || e.inPlatform || e.hidden) return false;
+                if (!fogData || fogW === 0) return true;
+                const idx = Math.floor(e.position.y) * fogW + Math.floor(e.position.x);
+                return (fogData[idx] ?? 0) === 2; // currently visible
+              }).slice(0, 8);
+              const hasPendingUnitReq = (id: string) => pending.some(
+                (p) => p.from === activeFaction && p.to === target && p.kind === "unitRequest" && p.unitId === id,
+              );
+              return (
+                <>
+                  {visibleAllyUnits.length > 0 && (
+                    <div className={styles.sectionTitle}>{uiText.diplomacy.proposeUnitRequest}</div>
+                  )}
+                  {visibleAllyUnits.map((u) => (
+                    <button
+                      key={u.id}
+                      className={styles.proposeBtn}
+                      disabled={hasPendingUnitReq(u.id)}
+                      onClick={() =>
+                        issueDiplomaticProposal({
+                          sender: activeFaction,
+                          target,
+                          kind: "unitRequest",
+                          unitId: u.id,
+                        })
+                      }
+                      title={`Request ${u.name ?? u.typeKey}`}
+                    >
+                      {u.name ?? u.typeKey}
+                    </button>
+                  ))}
+                </>
+              );
+            })()}
             {/* The AI accept gate lives at +{aiAcceptThreshold} alignment — surfaced here
                 so the player can see why a proposal might bounce. */}
             <div className={styles.empty} style={{ marginTop: 2 }}>

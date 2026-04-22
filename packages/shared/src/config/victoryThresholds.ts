@@ -34,9 +34,11 @@ export const technologicalVictory = {
     "dragon",
     "enchantress",
     "cleric",
-    // Cross-species requirement: research all upgrades in both trees
+    // Cross-species requirement: research all upgrades in both trees.
+    // `wizardMissiles` was in this list but is actually the Evoker's base
+    // attack — not a research item — so it was unreachable for tech victory.
+    // Removed to match the actual research tree.
     "woodToMetal",
-    "wizardMissiles",
     "iceBlast",
     "fieryExplosion",
     "manaShield",
