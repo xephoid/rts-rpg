@@ -1222,7 +1222,7 @@ export class GameEngine {
         }
         if (e.kind === "unit" && (e as UnitEntity).isFlying && !unit.canAttackAir) continue;
         if (!this._isTargetableBy(e, unit.faction)) continue;
-        const d = Math.hypot(e.position.x - unit.position.x, e.position.y - unit.position.y);
+        const d = this._distanceToTarget(unit.position, e);
         if (d <= effectiveRange + this._targetSizeRangeBonus(e) && d < bestDist) { bestDist = d; bestTarget = e; }
       }
       if (!bestTarget) continue;
@@ -1295,7 +1295,7 @@ export class GameEngine {
           if (eu.state.kind === "platformShell" || eu.state.kind === "garrisoned" || eu.state.kind === "inPlatform") continue;
         }
         if (!this._isTargetableBy(e, platform.faction)) continue;
-        const d = Math.hypot(e.position.x - platform.position.x, e.position.y - platform.position.y);
+        const d = this._distanceToTarget(platform.position, e);
         if (d <= attackRange + this._targetSizeRangeBonus(e) && d < bestDist) { bestDist = d; bestTarget = e; }
       }
       if (!bestTarget) continue;
@@ -2183,9 +2183,7 @@ export class GameEngine {
         unit.state = { kind: "idle" }; continue;
       }
 
-      const dx = target.position.x - unit.position.x;
-      const dy = target.position.y - unit.position.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const dist = this._distanceToTarget(unit.position, target);
       const effectiveRange = unit.stats.attackRange + this._targetSizeRangeBonus(target);
 
       if (dist > effectiveRange) {
@@ -2255,9 +2253,7 @@ export class GameEngine {
           if (eu.isFlying && !unit.canAttackAir) continue;
         }
         if (!this._isTargetableBy(entity, unit.faction)) continue;
-        const dx = entity.position.x - unit.position.x;
-        const dy = entity.position.y - unit.position.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const dist = this._distanceToTarget(unit.position, entity);
         if (dist <= unit.stats.attackRange + this._targetSizeRangeBonus(entity)) {
           unit.state = { kind: "attacking", targetId: entity.id, path: [], yieldTicks: 0 };
           break;
@@ -3051,25 +3047,47 @@ export class GameEngine {
     return true;
   }
 
-  /** A large (>1 footprint) unit extends past its collision tile. Attackers get a
-   *  range bonus equal to half the target's footprint-minus-one so the effective
-   *  engagement edge matches the rendered sprite edge. Buildings use their own
-   *  `footprintTiles` in the same way. */
+  /** A large (>1 footprint) unit extends past its 1×1 collision tile — the visual
+   *  sprite straddles the neighbours. Attackers against such a unit get a small
+   *  range bonus so the engagement edge matches what the player sees rendered. */
   private _targetSizeRangeBonus(target: Entity): number {
-    if (target.kind === "unit") {
-      const t = target as UnitEntity;
-      const stats = t.faction === "wizards"
-        ? wizardUnitStats[t.typeKey]
-        : robotUnitStats[t.typeKey];
-      const fp = stats?.footprintTiles ?? 1;
-      return Math.max(0, (fp - 1) * 0.5);
-    }
-    const b = target as BuildingEntity;
-    const stats = b.faction === "wizards"
-      ? wizardBuildingStats[b.typeKey]
-      : robotBuildingStats[b.typeKey];
+    if (target.kind !== "unit") return 0; // building distance uses AABB, no bonus needed
+    const t = target as UnitEntity;
+    const stats = t.faction === "wizards"
+      ? wizardUnitStats[t.typeKey]
+      : robotUnitStats[t.typeKey];
     const fp = stats?.footprintTiles ?? 1;
     return Math.max(0, (fp - 1) * 0.5);
+  }
+
+  /**
+   * Distance from an attacker's tile centre to its target. For buildings this is
+   * the shortest distance to the footprint bounding box (so an attacker adjacent
+   * to any tile of a multi-tile building reads as in range). For units we use
+   * the point-to-point distance between collision tile centres — a 2×2 unit
+   * still only occupies its 1×1 collision tile, and the visual over-reach is
+   * covered by `_targetSizeRangeBonus`.
+   */
+  private _distanceToTarget(attacker: Vec2, target: Entity): number {
+    const ax = attacker.x + 0.5;
+    const ay = attacker.y + 0.5;
+    if (target.kind === "building") {
+      const b = target as BuildingEntity;
+      const stats = b.faction === "wizards"
+        ? wizardBuildingStats[b.typeKey]
+        : robotBuildingStats[b.typeKey];
+      const fp = stats?.footprintTiles ?? 1;
+      const bx1 = target.position.x;
+      const by1 = target.position.y;
+      const bx2 = target.position.x + fp;
+      const by2 = target.position.y + fp;
+      const dx = Math.max(0, Math.max(bx1 - ax, ax - bx2));
+      const dy = Math.max(0, Math.max(by1 - ay, ay - by2));
+      return Math.hypot(dx, dy);
+    }
+    const tx = target.position.x + 0.5;
+    const ty = target.position.y + 0.5;
+    return Math.hypot(ax - tx, ay - ty);
   }
 
   private _updateFog(tick: number): void {
