@@ -3,7 +3,7 @@
 
 import { createNoise2D } from "simplex-noise";
 import type { TerrainType, Vec2 } from "@neither/shared";
-import { woodDeposit, waterDeposit, mapSizes } from "@neither/shared";
+import { woodDeposit, waterDeposit, mapSizes, spawnWoodGuarantee } from "@neither/shared";
 
 // Every forest tile is a wood resource; every water tile is a water resource.
 // Quantities are fixed per tile — see resourceCosts.ts for values.
@@ -37,6 +37,12 @@ export type MapGeneratorOptions = {
 const WATER_THRESHOLD = -0.35;
 const FOREST_THRESHOLD = 0.25;
 const MOUNTAIN_THRESHOLD = 0.72;
+
+/** Tiles inside this radius around each spawn are reset to open + stripped of
+ *  deposits so the 4×4 castle/home footprint can land. Referenced by the wood-
+ *  guarantee bias so the counted forest tiles are in the ring that actually
+ *  survives the clear pass. */
+const STARTING_CLEAR_RADIUS = 6;
 
 /** Seeded RNG (xorshift32) — deterministic map generation from a seed. */
 function makeRng(seed: number): () => number {
@@ -129,7 +135,6 @@ export function generateMap(grid: Grid, options: MapGeneratorOptions): Omit<Gene
 
   // ── Clear resources near starting positions ──────────────────────────────────
   // Castle/home footprint is 4×4; sp is top-left corner — center at sp+1.5
-  const STARTING_CLEAR_RADIUS = 6;
   for (const sp of startingPositions) {
     const cx = sp.x + 1.5;
     const cy = sp.y + 1.5;
@@ -152,7 +157,104 @@ export function generateMap(grid: Grid, options: MapGeneratorOptions): Omit<Gene
   // ── Guarantee ground connectivity between bases ─────────────────────────────
   ensureGroundConnectivity(grid, startingPositions, deposits);
 
+  // ── Guarantee nearby wood for every spawn ───────────────────────────────────
+  // Runs AFTER connectivity carving so the carve can't accidentally cut through
+  // a newly planted grove (the carve converts any non-open tile it traverses to
+  // open, which would silently delete a planted deposit).
+  ensureSpawnWood(grid, startingPositions, deposits);
+
   return { deposits, startingPositions };
+}
+
+/**
+ * After the clear + connectivity passes, any spawn with fewer than
+ * `spawnWoodGuarantee.minDeposits` wood deposits inside
+ * `spawnWoodGuarantee.radiusTiles` gets a small planted grove in the ring
+ * between the clear radius and the guarantee radius. Tiles are flipped to
+ * `forest` terrain + a new `ResourceDeposit` is appended so the planted wood
+ * reads identically to noise-generated wood everywhere else in the engine.
+ */
+function ensureSpawnWood(
+  grid: Grid,
+  startingPositions: Vec2[],
+  deposits: ResourceDeposit[],
+): void {
+  const { radiusTiles, minDeposits } = spawnWoodGuarantee;
+  const radiusSq = radiusTiles * radiusTiles;
+  const clearSq = STARTING_CLEAR_RADIUS * STARTING_CLEAR_RADIUS;
+
+  for (const sp of startingPositions) {
+    const cx = sp.x + 1.5;
+    const cy = sp.y + 1.5;
+    const existing = deposits.filter(
+      (d) =>
+        d.kind === "wood" &&
+        (d.position.x + 0.5 - cx) ** 2 + (d.position.y + 0.5 - cy) ** 2 <= radiusSq,
+    );
+    if (existing.length >= minDeposits) continue;
+    const needed = minDeposits - existing.length;
+
+    // Collect passable `open` tiles in the survive-clear ring, nearest first.
+    // Fallback radius 1.5× handles edge cases where the nominal ring is mostly
+    // water or out of bounds.
+    const ringLimit = Math.ceil(radiusTiles * 1.5);
+    const candidates: Array<{ x: number; y: number; distSq: number }> = [];
+    for (let dy = -ringLimit; dy <= ringLimit; dy++) {
+      for (let dx = -ringLimit; dx <= ringLimit; dx++) {
+        const tx = sp.x + dx;
+        const ty = sp.y + dy;
+        if (!grid.inBounds(tx, ty)) continue;
+        const fdx = tx + 0.5 - cx;
+        const fdy = ty + 0.5 - cy;
+        const distSq = fdx * fdx + fdy * fdy;
+        if (distSq <= clearSq) continue; // inside clear — would be wiped
+        const tile = grid.getTile(tx, ty);
+        if (!tile || tile.terrain !== "open") continue;
+        if (deposits.some((d) => d.position.x === tx && d.position.y === ty)) continue;
+        candidates.push({ x: tx, y: ty, distSq });
+      }
+    }
+    if (candidates.length === 0) continue; // genuinely no room; rare edge case
+
+    candidates.sort((a, b) => a.distSq - b.distSq);
+
+    // Pick the closest candidate, then cluster: prefer subsequent tiles within
+    // 2 tiles of an already-picked tile so the planted patch reads as one grove
+    // rather than scattered lone trees.
+    const picked: Array<{ x: number; y: number }> = [];
+    while (picked.length < needed) {
+      let next: { x: number; y: number; distSq: number } | null = null;
+      if (picked.length === 0) {
+        next = candidates[0] ?? null;
+      } else {
+        for (const c of candidates) {
+          if (picked.some((p) => p.x === c.x && p.y === c.y)) continue;
+          const near = picked.some((p) => {
+            const ddx = p.x - c.x;
+            const ddy = p.y - c.y;
+            return ddx * ddx + ddy * ddy <= 4; // within 2 tiles
+          });
+          if (near) { next = c; break; }
+        }
+        // No clustered option left — take the overall-nearest that isn't already picked.
+        if (!next) {
+          next = candidates.find((c) => !picked.some((p) => p.x === c.x && p.y === c.y)) ?? null;
+        }
+      }
+      if (!next) break;
+      picked.push({ x: next.x, y: next.y });
+    }
+
+    for (const p of picked) {
+      grid.setTerrain(p.x, p.y, "forest", woodDeposit.quantity);
+      deposits.push({
+        id: `deposit_wood_planted_${deposits.length}`,
+        kind: "wood",
+        position: { x: p.x, y: p.y },
+        quantity: woodDeposit.quantity,
+      });
+    }
+  }
 }
 
 /**
@@ -251,20 +353,49 @@ function placeStartingPositions(
     ].slice(0, count);
   }
 
+  // Soft bias toward wood: prefer candidates whose ring between the clear
+  // radius and the guarantee radius already has enough forest tiles to satisfy
+  // the minimum. The post-clear plant pass handles the rest — but letting the
+  // greedy max-distance loop work on an already-wood-rich shortlist keeps maps
+  // looking organic whenever possible. Falls back to the full list if the
+  // shortlist is empty (very sparse-forest maps).
+  const { radiusTiles, minDeposits } = spawnWoodGuarantee;
+  const radiusSq = radiusTiles * radiusTiles;
+  const clearSq = STARTING_CLEAR_RADIUS * STARTING_CLEAR_RADIUS;
+  const forestRich = candidates.filter((c) => {
+    let count = 0;
+    for (let dy = -radiusTiles; dy <= radiusTiles; dy++) {
+      for (let dx = -radiusTiles; dx <= radiusTiles; dx++) {
+        const tx = c.x + dx;
+        const ty = c.y + dy;
+        if (!grid.inBounds(tx, ty)) continue;
+        const fdx = tx + 0.5 - (c.x + 1.5);
+        const fdy = ty + 0.5 - (c.y + 1.5);
+        const d2 = fdx * fdx + fdy * fdy;
+        if (d2 <= clearSq) continue; // inside clear — about to be wiped
+        if (d2 > radiusSq) continue;  // outside guarantee radius
+        if (grid.getTile(tx, ty)?.terrain === "forest") count++;
+      }
+    }
+    return count >= minDeposits;
+  });
+  const pool = forestRich.length > 0 ? forestRich : candidates;
+
   if (count === 1) {
-    return [candidates[Math.floor(rng() * candidates.length)]!];
+    return [pool[Math.floor(rng() * pool.length)]!];
   }
 
-  // For 2 factions: pick first randomly, then pick the candidate farthest from it
+  // For 2 factions: pick first randomly from the pool, then pick the candidate
+  // farthest from it — still searching the biased pool where possible.
   const positions: Vec2[] = [];
-  const first = candidates[Math.floor(rng() * candidates.length)]!;
+  const first = pool[Math.floor(rng() * pool.length)]!;
   positions.push(first);
 
   for (let i = 1; i < count; i++) {
-    let best: Vec2 = candidates[0]!;
+    let best: Vec2 = pool[0]!;
     let bestMinDist = -1;
 
-    for (const c of candidates) {
+    for (const c of pool) {
       let minDist = Infinity;
       for (const p of positions) {
         const dx = c.x - p.x;

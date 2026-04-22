@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { generateMap } from "./MapGenerator.js";
 import { Grid } from "../spatial/Grid.js";
-import { mapSizes } from "@neither/shared";
+import { mapSizes, spawnWoodGuarantee } from "@neither/shared";
 
 function makeGrid(size: "small" | "medium" | "large" = "small"): Grid {
   const { widthTiles: W, heightTiles: H } = mapSizes[size];
@@ -118,5 +118,42 @@ describe("generateMap", () => {
     const { deposits } = generateMap(grid, { size: "small", seed: 42 });
     const ids = deposits.map((d) => d.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("every spawn has at least minDeposits wood within radiusTiles across many seeds", () => {
+    const { radiusTiles, minDeposits } = spawnWoodGuarantee;
+    const radiusSq = radiusTiles * radiusTiles;
+    const sizes: Array<"small" | "medium" | "large"> = ["small", "medium", "large"];
+    // 20 seeds × 3 sizes — cheap enough, and wide enough to catch map-generation regressions.
+    for (const size of sizes) {
+      for (let seed = 1; seed <= 20; seed++) {
+        const grid = makeGrid(size);
+        const { deposits, startingPositions } = generateMap(grid, { size, seed });
+        for (const sp of startingPositions) {
+          const cx = sp.x + 1.5;
+          const cy = sp.y + 1.5;
+          const nearWood = deposits.filter(
+            (d) =>
+              d.kind === "wood" &&
+              (d.position.x + 0.5 - cx) ** 2 + (d.position.y + 0.5 - cy) ** 2 <= radiusSq,
+          ).length;
+          expect(
+            nearWood,
+            `size=${size} seed=${seed} spawn=(${sp.x},${sp.y}) had ${nearWood} wood within ${radiusTiles} tiles`,
+          ).toBeGreaterThanOrEqual(minDeposits);
+        }
+      }
+    }
+  });
+
+  it("planted deposits sit on forest terrain (visual consistency)", () => {
+    // Force planting by using a seed likely to produce a wood-poor spawn; verify
+    // every wood deposit's tile is actually `forest`.
+    const grid = makeGrid("small");
+    const { deposits } = generateMap(grid, { size: "small", seed: 7 });
+    for (const d of deposits.filter((x) => x.kind === "wood")) {
+      const tile = grid.getTile(d.position.x, d.position.y);
+      expect(tile?.terrain).toBe("forest");
+    }
   });
 });

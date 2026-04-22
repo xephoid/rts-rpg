@@ -23,4 +23,16 @@ export const startingResources = {
     water: 100,
     mana: 0, // mana generates passively; no starting pool
 };
+/**
+ * Floor on how much wood every spawn must have within easy reach. Map generation
+ * first prefers spawn candidates whose surroundings already satisfy the floor
+ * (a soft bias) and then plants a small forest cluster on any spawn still short
+ * after the 6-tile clear radius wipes its immediate neighbourhood (a hard
+ * guarantee). Without this, noise-driven forest placement can leave a player
+ * with zero accessible wood while their opponent has a grove next door.
+ */
+export const spawnWoodGuarantee = {
+    radiusTiles: 12, // Initial guess: ~15s Surf round trip
+    minDeposits: 3, // Initial guess: ~750 wood, covers early build-out
+};
 //# sourceMappingURL=mapConfig.js.map
