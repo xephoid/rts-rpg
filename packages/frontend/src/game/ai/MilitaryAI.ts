@@ -60,6 +60,7 @@ export interface AIEngineInterface {
   issueEnterPlatformOrder(coreId: string, platformId: string): void;
   issueHideOrder(unitId: string, buildingId: string): void;
   issueResearchOrder(buildingId: string, researchKey: string): void;
+  issueConvertOrder(casterId: string, targetId: string): void;
   issueRespondToProposal(proposalId: string, accept: boolean): void;
   getAlignment(from: Faction, toward: Faction): number;
   bumpAlignment(from: Faction, toward: Faction, delta: number): void;
@@ -227,12 +228,12 @@ const WIZARD_TURTLE_COMPOSITION: readonly CompEntry[] = [
 ];
 
 const ROBOT_ARMY_COMPOSITION: readonly CompEntry[] = [
-  { typeKey: "spitterPlatform", weight: 48 },
-  { typeKey: "spinnerPlatform", weight: 28 },
-  { typeKey: "largeCombatPlatform", weight: 19 },
+  { typeKey: "spitterPlatform", weight: 60 },
+  { typeKey: "spinnerPlatform", weight: 10 },
+  { typeKey: "largeCombatPlatform", weight: 15 },
   // Low-weight anti-air / mobility pick. Produced at Aerial Frame Production,
   // gated behind a separate tech building from the main combat platforms.
-  { typeKey: "stingerPlatform", weight: 5 },
+  { typeKey: "stingerPlatform", weight: 15 },
 ];
 
 const ROBOT_TURTLE_COMPOSITION: readonly CompEntry[] = [
@@ -1310,7 +1311,7 @@ export class MilitaryAI {
 
 // ── Free helpers ────────────────────────────────────────────────────────────
 
-function _distSq(a: Vec2, b: Vec2): number {
+export function _distSq(a: Vec2, b: Vec2): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   return dx * dx + dy * dy;
@@ -1557,7 +1558,7 @@ function _pickCompositionUnit(
   return bestKey;
 }
 
-function _totalQueued(b: BuildingEntity): number {
+export function _totalQueued(b: BuildingEntity): number {
   return (b.state.kind === "producing" ? 1 : 0) + b.productionQueue.length;
 }
 
@@ -1570,7 +1571,7 @@ function _queuedCount(bs: BuildingEntity[], typeKey: string): number {
   return n;
 }
 
-function _isQueuedIn(b: BuildingEntity, typeKey: string): boolean {
+export function _isQueuedIn(b: BuildingEntity, typeKey: string): boolean {
   if (b.state.kind === "producing" && b.state.unitTypeKey === typeKey) return true;
   return b.productionQueue.includes(typeKey);
 }

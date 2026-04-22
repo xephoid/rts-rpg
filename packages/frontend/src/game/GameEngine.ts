@@ -70,6 +70,7 @@ import { UnitEntity } from "./entities/UnitEntity.js";
 import { BuildingEntity } from "./entities/BuildingEntity.js";
 import { findPath } from "./spatial/Pathfinder.js";
 import { MilitaryAI } from "./ai/MilitaryAI.js";
+import { TechnologyAI } from "./ai/TechnologyAI.js";
 
 export type GameEngineConfig = {
   mapSize?: MapSize;
@@ -206,7 +207,13 @@ export class GameEngine {
 
   /** One MilitaryAI per non-human active faction. Empty in headless mode (no
    *  `playerFaction`). Each tick every AI runs independently. */
-  private readonly _ais: MilitaryAI[];
+  /** One AI archetype per non-human active faction. Empty in headless mode.
+   *  Both `MilitaryAI` and `TechnologyAI` share `{tick(tick, engine): void}`
+   *  structurally so the engine can iterate them uniformly. */
+  private readonly _ais: Array<MilitaryAI | TechnologyAI>;
+  /** Archetype assigned to each faction slot at match start. Inactive slots
+   *  hold a default; read via `activeFactions` filter before display. */
+  private readonly factionArchetype: Record<Faction, "military" | "technology">;
 
   // ── Phase 14 diplomacy state (persistent across ticks) ─────────────────────
   /** Bilateral alignment map. `_alignment[A][B]` is A's alignment toward B. Both
@@ -301,12 +308,32 @@ export class GameEngine {
     }
     this.loop = new GameLoop(this.tick.bind(this));
 
-    // One MilitaryAI per non-human active faction. Headless runs (no player)
-    // skip AI entirely so tests can control the simulation directly.
+    // Roll an archetype per non-human active faction. 70/30 military/tech
+    // weight — players still overwhelmingly face Military waves, with the
+    // occasional Tech racer to keep matches unpredictable.
+    const archetypeRoll = seededRng((seed ?? 0) ^ 0x7ec4a1);
+    const archetype: Record<Faction, "military" | "technology"> = {
+      wizards: "military", robots: "military",
+      f3: "military", f4: "military", f5: "military", f6: "military",
+    };
+    for (const f of this.activeFactions) {
+      if (f === playerFaction) continue;
+      archetype[f] = archetypeRoll() < 0.3 ? "technology" : "military";
+    }
+    this.factionArchetype = archetype;
+
+    // One AI per non-human active faction, typed by the rolled archetype.
+    // Headless runs (no player) skip AI entirely so tests can control the
+    // simulation directly.
     this._ais = playerFaction
       ? this.activeFactions
           .filter((f) => f !== playerFaction)
-          .map((f) => new MilitaryAI(f, this.factionSpecies[f]))
+          .map((f) => {
+            const species = this.factionSpecies[f];
+            return archetype[f] === "technology"
+              ? new TechnologyAI(f, species)
+              : new MilitaryAI(f, species);
+          })
       : [];
   }
 

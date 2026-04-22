@@ -187,7 +187,7 @@ describe("Technological victory detection", () => {
     // grantUnlock hook. Since grantUnlock doesn't exist, reach into the
     // internal set directly for this test — the behaviour under test is the
     // threshold trigger, not the unlock plumbing (covered elsewhere).
-    const set = (engine as unknown as { _unlockedItems: Record<string, Set<string>> })._unlockedItems.wizards;
+    const set = (engine as unknown as { _unlockedItems: Record<string, Set<string>> })._unlockedItems.wizards!;
     const quota = Math.ceil(technologicalVictory.requiredItems.length * 0.75);
     for (let i = 0; i < quota; i++) set.add(technologicalVictory.requiredItems[i]!);
 
@@ -207,7 +207,7 @@ describe("Technological victory detection", () => {
       if (p.condition === "technological") victoryEvent = true;
     });
 
-    const set = (engine as unknown as { _unlockedItems: Record<string, Set<string>> })._unlockedItems.wizards;
+    const set = (engine as unknown as { _unlockedItems: Record<string, Set<string>> })._unlockedItems.wizards!;
     for (const item of technologicalVictory.requiredItems) set.add(item);
 
     engine.stepTick(0, 0);
