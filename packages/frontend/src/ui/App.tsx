@@ -114,7 +114,11 @@ export function App() {
         }
       },
       onAttachOrder: (coreId, platformId) => {
-        useUIStore.getState().issueAttach(coreId, platformId);
+        // Call the engine directly rather than routing through uiStore.pendingAttach.
+        // The store holds a single-slot pending order, so bulk attach (multiple Cores
+        // right-clicking one platform) would only keep the last one. Garrison + enter
+        // platform already bypass the store for the same reason.
+        engineRef.current?.issueAttachOrder(coreId, platformId);
       },
       onGarrisonOrder: (unitId, towerId) => {
         engineRef.current?.issueGarrisonOrder(unitId, towerId);
