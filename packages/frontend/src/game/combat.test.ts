@@ -7,6 +7,7 @@ import {
   wizardBuildingStats,
   wizardUnitStats,
   namedLeaders,
+  aiParameters,
 } from "@neither/shared";
 
 /**
@@ -475,5 +476,66 @@ describe("AI fragility — push mode short-circuits when all enemies are treaty-
       (u) => u.state.kind === "attacking",
     );
     expect(anyAttackingWizards).toBe(false);
+  });
+});
+
+describe("Combat notifications", () => {
+  it("fires at most one 'under attack' alert per faction per cooldown window", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards",
+      onTick: () => {},
+      onAlert: (m) => { if (m.includes("under attack")) alerts.push(m); },
+    });
+
+    // Wizard evoker taking damage from a robot spitter — spawn adjacent and
+    // issue attack order.
+    const wStats = wizardUnitStats.evoker!;
+    const victim = new UnitEntity({
+      faction: "wizards", typeKey: "evoker", position: { x: 40, y: 40 },
+      stats: {
+        maxHp: wStats.hp, damage: wStats.damage,
+        attackRange: wStats.attackRange, sightRange: wStats.sightRange,
+        speed: wStats.speed, charisma: wStats.charisma,
+        armor: wStats.armor, capacity: wStats.capacity,
+      },
+    });
+    engine.entities.add(victim);
+
+    const sStats = robotUnitStats.spitterPlatform!;
+    const attacker = new UnitEntity({
+      faction: "robots", typeKey: "spitterPlatform", position: { x: 41, y: 40 },
+      stats: {
+        maxHp: sStats.hpWood, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armorWood, capacity: sStats.capacity,
+      },
+    });
+    attacker.attachedCoreId = "fake";
+    engine.entities.add(attacker);
+    engine.issueAttackOrder(attacker.id, victim.id);
+
+    // Run a few attack cycles (60 ticks per attack at interval 1). The
+    // throttle should cap us at ≤1 alert within the first cooldown window.
+    const withinCooldown = Math.min(aiParameters.underAttackAlertCooldownTicks - 1, 300);
+    for (let t = 0; t < withinCooldown; t++) engine.stepTick(t, t * 16);
+    expect(alerts.length).toBeLessThanOrEqual(1);
+    expect(alerts[0]).toContain("evoker");
+  });
+
+  it("fires a 'ready' notification on own-faction unit production completion", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards",
+      onTick: () => {},
+      onAlert: (m) => { alerts.push(m); },
+    });
+    const castle = engine.entities.buildingsByFaction("wizards").find((b) => b.typeKey === "castle")!;
+    engine.getResources("wizards").wood = 500;
+    engine.getResources("wizards").water = 500;
+    engine.issueProductionOrder(castle.id, "subject");
+    for (let t = 0; t < 2000; t++) engine.stepTick(t, t * 16);
+    expect(alerts.some((m) => m.includes("subject") && m.includes("ready"))).toBe(true);
   });
 });

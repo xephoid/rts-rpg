@@ -10,6 +10,13 @@ export const aiParameters = {
 
   // Initial guess: gathering baseline — tech AI allocates 70% of units to resource tasks.
   gatheringBaseline: 0.7,
+
+  // "Under attack" alert cooldown (per faction). Combat damage lands every
+  // ~1 attack-interval, so without a throttle the player sees a wall of
+  // "under attack" lines during any sustained skirmish. 10 seconds at 60
+  // ticks/s still surfaces new engagements promptly while staying quiet
+  // during an ongoing fight.
+  underAttackAlertCooldownTicks: 60 * 10,
 };
 
 // NPC faction starting alignment (-100 = hostile, 0 = neutral, 100 = allied)

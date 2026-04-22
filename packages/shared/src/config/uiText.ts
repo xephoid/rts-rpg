@@ -41,6 +41,19 @@ export const uiText = {
     unexplored: "Unexplored",
     explored: "Explored",
   },
+  notifications: {
+    /** Fired when a building finishes construction for the player's faction. */
+    buildingComplete: (typeKey: string) => `${typeKey} constructed`,
+    /** Fired when a unit finishes production for the player's faction. */
+    unitComplete: (typeKey: string) => `${typeKey} ready`,
+    /** Fired when any player-owned unit takes damage. Rate-limited per faction
+     *  so sustained combat doesn't flood the log — see
+     *  `aiParameters.underAttackAlertCooldownTicks`. */
+    unitUnderAttack: (typeKey: string) => `Your ${typeKey} is under attack`,
+    /** Same throttle as unitUnderAttack; separate copy so the player can
+     *  distinguish a unit skirmish from a base harass at a glance. */
+    buildingUnderAttack: (typeKey: string) => `Your ${typeKey} is under attack`,
+  },
   spy: {
     invisibilityOn: "Invisibility",
     invisibilityOff: "Drop Invisibility",

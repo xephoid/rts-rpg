@@ -56,6 +56,7 @@ import {
   victoryAlert,
   uiText,
   diplomacy as diplomacyConfig,
+  aiParameters,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
@@ -204,6 +205,32 @@ export class GameEngine {
   /** True once a tech victory has been declared — prevents double-firing the
    *  VictoryAlert event or re-entering the winner declaration path. */
   private _techVictoryDeclared = false;
+
+  /** Per-faction tick of last "under attack" alert fire. Combat damage lands
+   *  multiple times per second during a skirmish; without a throttle the
+   *  player's alert log floods with identical lines. Keyed by the VICTIM's
+   *  faction so the same attacker hitting two different factions doesn't
+   *  steal each other's alerts. */
+  private _lastUnderAttackAlertTick: Record<Faction, number> = fullFactionRecord(() => -Infinity);
+  /** Current tick, cached each call to `tick()`. Damage handlers can read
+   *  this for throttling / alert cooldown without threading the param. */
+  private _currentTick = 0;
+
+  /**
+   * Fire an "under attack" alert for the victim's owning faction, but at most
+   * once per `aiParameters.underAttackAlertCooldownTicks`. Only the human
+   * player's own-faction damage surfaces; AI-vs-AI combat stays quiet.
+   */
+  private _maybeUnderAttackAlert(target: Entity): void {
+    if (!this._isPlayerFaction(target.faction)) return;
+    const last = this._lastUnderAttackAlertTick[target.faction];
+    if (this._currentTick - last < aiParameters.underAttackAlertCooldownTicks) return;
+    this._lastUnderAttackAlertTick[target.faction] = this._currentTick;
+    const msg = target.kind === "building"
+      ? uiText.notifications.buildingUnderAttack(target.typeKey)
+      : uiText.notifications.unitUnderAttack(target.typeKey);
+    this.onAlert?.(msg);
+  }
 
   /** One MilitaryAI per non-human active faction. Empty in headless mode (no
    *  `playerFaction`). Each tick every AI runs independently. */
@@ -1122,6 +1149,7 @@ export class GameEngine {
 
     const dmg = Math.max(1, platform.stats.damage - occupant.stats.armor);
     occupant.stats.hp -= dmg;
+    this._maybeUnderAttackAlert(occupant);
 
     // Always eject on hit — forces the target out of cover regardless of survival.
     const eject = this._findEjectTile(building.position, occupant.id);
@@ -1304,6 +1332,9 @@ export class GameEngine {
       if (done) {
         // Tech-victory unlock on first completion of this building typeKey.
         this._unlockedItems[building.faction].add(building.typeKey);
+        if (this._isPlayerFaction(building.faction)) {
+          this.onAlert?.(uiText.notifications.buildingComplete(building.typeKey));
+        }
         if (SINGLE_USE_BUILDERS.has(unit.typeKey)) {
           // Eject any attached Core before removing the platform
           if (unit.attachedCoreId) this.issueDetachOrder(unit.id);
@@ -1467,6 +1498,7 @@ export class GameEngine {
       if (bestTarget.kind === "unit" && (bestTarget as UnitEntity).manaShielded)
         dmg = Math.floor(dmg * (1 - spellCosts.manaShieldDamageReduction));
       bestTarget.stats.hp -= dmg;
+      if (dmg > 0) this._maybeUnderAttackAlert(bestTarget);
 
       this._attackEvents.push({
         attackerId: unit.id,
@@ -1545,6 +1577,7 @@ export class GameEngine {
         dmg = Math.floor(dmg * (1 - spellCosts.manaShieldDamageReduction));
       }
       bestTarget.stats.hp -= dmg;
+      if (dmg > 0) this._maybeUnderAttackAlert(bestTarget);
 
       this._attackEvents.push({
         attackerId: platform.id,
@@ -2378,6 +2411,10 @@ export class GameEngine {
     // Permanent tech-victory checkmark — first time this faction produces
     // this unit typeKey. Set add() is a no-op on repeats.
     this._unlockedItems[building.faction].add(unitTypeKey);
+    // Notify the player when one of their own units finishes production.
+    if (this._isPlayerFaction(building.faction)) {
+      this.onAlert?.(uiText.notifications.unitComplete(unitTypeKey));
+    }
   }
 
   private _findSpawnTile(building: BuildingEntity, isFlying = false): Vec2 | null {
@@ -2509,6 +2546,7 @@ export class GameEngine {
       if (unit.damageBonusMultiplier !== 1.0)
         dmg = Math.round(dmg * unit.damageBonusMultiplier);
       target.stats.hp -= dmg;
+      if (dmg > 0) this._maybeUnderAttackAlert(target);
 
       // Phase 14 alignment: every hit moves the VICTIM's faction alignment
       // toward the attacker downward. Combat grudges stack over the match.
@@ -3198,6 +3236,7 @@ export class GameEngine {
       if (ex * ex + ey * ey > radiusSq) continue;
       const dmg = Math.max(0, spellEffects.fieryExplosion.damage - entity.stats.armor);
       entity.stats.hp -= dmg;
+      if (dmg > 0) this._maybeUnderAttackAlert(entity);
       if (entity.stats.hp <= 0) this._handleEntityDeath(entity, casterId);
     }
   }
@@ -3556,6 +3595,7 @@ export class GameEngine {
   // ── Fog ───────────────────────────────────────────────────────────────────────
 
   private tick(tick: number, elapsedMs: number): void {
+    this._currentTick = tick;
     for (const ai of this._ais) ai.tick(tick, this);
     this._syncPassengerPositions();
     this._syncGarrisonedPositions();
