@@ -97,6 +97,11 @@ function fullFactionRecord<T>(make: () => T): Record<Faction, T> {
   };
 }
 
+/** Shared empty buffer used by stub fog snapshots for non-viewing factions.
+ *  Kept module-level so every tick emission reuses the same zero-length array
+ *  instead of allocating a fresh one per inactive slot. */
+const EMPTY_FOG_DATA: Uint8Array = new Uint8Array(0);
+
 /** Seeded xorshift32 — mirrors MapGenerator's RNG so species rolls are reproducible
  *  from the same seed. Falls back to Date.now() if no seed supplied. */
 function seededRng(seed?: number): () => number {
@@ -3260,13 +3265,25 @@ export class GameEngine {
     this._cleanupDeadEntities();
 
     const resourcesSnap = fullFactionRecord<ResourcePool>(() => ({ wood: 0, water: 0, mana: 0 }));
-    const fogSnap = fullFactionRecord<FogSnapshot>(() => this.fog.wizards.snapshot());
+    // Fog snapshots are consumed by the renderer, minimap, and headless tests —
+    // all of which only read the viewing faction's entry. Emitting a real
+    // snapshot for every slot allocates a full FogOfWar view per faction per
+    // tick; on a 256×256 large map with 6 active slots that's wasted work
+    // nobody reads. Only the viewer (playerFaction, or every active faction
+    // when running headless for tests) gets the live snapshot; the rest get
+    // an empty stub that satisfies the type without touching the grid.
+    const emptyFog: FogSnapshot = { width: 0, height: 0, data: EMPTY_FOG_DATA };
+    const fogSnap = fullFactionRecord<FogSnapshot>(() => emptyFog);
+    const viewerFactions: readonly Faction[] =
+      this.playerFaction ? [this.playerFaction] : this.activeFactions;
+    for (const f of viewerFactions) {
+      fogSnap[f] = this.fog[f].snapshot();
+    }
     const completedSnap = fullFactionRecord<string[]>(() => []);
     const detectedSnap = fullFactionRecord<string[]>(() => []);
     const detectedIdsMap = this._computeDetectedIds();
     for (const f of FACTIONS) {
       resourcesSnap[f] = { ...this.resources[f] };
-      fogSnap[f] = this.fog[f].snapshot();
       completedSnap[f] = [...(this._completedResearch.get(f) ?? [])];
       detectedSnap[f] = detectedIdsMap[f];
     }
