@@ -380,6 +380,62 @@ describe("AI fragility — occupant eviction finds tiles beyond radius 1", () =>
   });
 });
 
+describe("N-faction attach / garrison — species check, not slot literal", () => {
+  it("issueAttachOrder succeeds when the Core and platform are in a robots-species slot other than 'robots'", () => {
+    // Match with medium map so slot "f3" is active. We need a faction in
+    // slot `f3` that is playing the robots species — seed=1's species roll
+    // can end up either way, so we use the engine's factionSpecies to find
+    // a robot-species slot outside the legacy "robots" literal.
+    let snap: { factionSpecies: Record<string, string>; activeFactions: readonly string[] } | null = null;
+    const engine = new GameEngine({
+      mapSize: "medium", seed: 1,
+      onTick: (s) => { snap = s; },
+    });
+    engine.stepTick(0, 0);
+
+    const s = snap as { factionSpecies: Record<string, string>; activeFactions: readonly string[] } | null;
+    const robotSlot = (s?.activeFactions ?? []).find(
+      (f) => f !== "robots" && s?.factionSpecies[f] === "robots",
+    ) as ("f3" | "f4" | "f5" | "f6") | undefined;
+    // Skip gracefully if this seed didn't roll a non-legacy robot slot —
+    // the fix is species-keyed and covers every Faction slot uniformly.
+    if (!robotSlot) return;
+
+    const cStats = robotUnitStats.core!;
+    const core = new UnitEntity({
+      faction: robotSlot,
+      typeKey: "core",
+      position: { x: 50, y: 50 },
+      stats: {
+        maxHp: cStats.hpWood, damage: cStats.damage,
+        attackRange: cStats.attackRange, sightRange: cStats.sightRange,
+        speed: cStats.speed, charisma: cStats.charisma,
+        armor: cStats.armorWood, capacity: cStats.capacity,
+      },
+    });
+    engine.entities.add(core);
+
+    const pStats = robotUnitStats.woodChopperPlatform!;
+    const platform = new UnitEntity({
+      faction: robotSlot,
+      typeKey: "woodChopperPlatform",
+      position: { x: 52, y: 50 },
+      stats: {
+        maxHp: pStats.hpWood, damage: pStats.damage,
+        attackRange: pStats.attackRange, sightRange: pStats.sightRange,
+        speed: pStats.speed, charisma: pStats.charisma,
+        armor: pStats.armorWood, capacity: pStats.capacity,
+      },
+    });
+    engine.entities.add(platform);
+
+    // Pre-check — order path would have been rejected by the old literal
+    // `core.faction !== "robots"` guard for this slot.
+    engine.issueAttachOrder(core.id, platform.id);
+    expect(core.state.kind).toBe("attachMove");
+  });
+});
+
 describe("AI fragility — push mode short-circuits when all enemies are treaty-locked", () => {
   it("does not flip inAttack or issue wave when every opposing active faction is treaty-bound", () => {
     const engine = new GameEngine({

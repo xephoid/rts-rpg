@@ -791,12 +791,16 @@ export class GameEngine {
     const coreEntity = this.entities.get(coreId);
     if (!coreEntity || coreEntity.kind !== "unit") return;
     const core = coreEntity as UnitEntity;
-    if ((core.typeKey !== "core" && core.typeKey !== "motherboard") || core.faction !== "robots" || core.attachedPlatformTypeKey) return;
+    // Check species, not the literal "robots" slot id — an AI faction in slot
+    // f3/f4/f5/f6 playing the robots species has `faction === "f3"` etc. The
+    // old literal check silently rejected every attach order in N-faction
+    // matches, leaving gatherer/combat platforms unattached forever.
+    if ((core.typeKey !== "core" && core.typeKey !== "motherboard") || this.factionSpecies[core.faction] !== "robots" || core.attachedPlatformTypeKey) return;
 
     const platformEntity = this.entities.get(platformId);
     if (!platformEntity || platformEntity.kind !== "unit") return;
     const platform = platformEntity as UnitEntity;
-    if (!ROBOT_PLATFORM_TYPES.has(platform.typeKey) || platform.faction !== "robots" || platform.attachedCoreId !== null) return;
+    if (!ROBOT_PLATFORM_TYPES.has(platform.typeKey) || this.factionSpecies[platform.faction] !== "robots" || platform.attachedCoreId !== null) return;
 
     const start = { x: Math.round(core.position.x), y: Math.round(core.position.y) };
     const goal = this._nearestAttachTile(platform.position, core.position);
@@ -843,7 +847,8 @@ export class GameEngine {
     const unitEntity = this.entities.get(unitId);
     if (!unitEntity || unitEntity.kind !== "unit") return;
     const unit = unitEntity as UnitEntity;
-    if (unit.faction !== "wizards") return;
+    // Species check — see issueAttachOrder for the N-faction rationale.
+    if (this.factionSpecies[unit.faction] !== "wizards") return;
     if (unit.typeKey !== "evoker" && unit.typeKey !== "archmage") return;
     if (unit.garrisonedBuildingId) return;
 
