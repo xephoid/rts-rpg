@@ -1157,6 +1157,15 @@ export class GameEngine {
           (d) => d.position.x === tx && d.position.y === ty && d.quantity > 0
         );
         if (hasDeposit) return false;
+        // Prevent building on any ground unit — the moment construction starts
+        // the footprint tiles get blocked, so anyone standing on them would
+        // be trapped inside the finished building. Flying units pass since
+        // they don't share the ground collision layer.
+        for (const u of this.entities.units()) {
+          if (u.isFlying) continue;
+          if (u.state.kind === "platformShell") continue; // passenger — not on the tile
+          if (Math.round(u.position.x) === tx && Math.round(u.position.y) === ty) return false;
+        }
       }
     }
     // Water-adjacent buildings must touch at least one water tile
@@ -1498,8 +1507,17 @@ export class GameEngine {
               break; // retry on next tick with the detour path
             }
           }
-          // Nudge idle friendly blocker (for any movement type, not just gather)
-          if (state.yieldTicks === 0 && blocker && blocker.faction === unit.faction) {
+          // Nudge idle friendly blocker (for any movement type, not just
+          // gather). Strictly idle — _nudgeUnit overwrites `state`, so
+          // nudging a gathering/constructing/converting unit would silently
+          // cancel its task. Better to let the passerby's next replan find
+          // another route than to clobber a worker that's already on the job.
+          if (
+            state.yieldTicks === 0 &&
+            blocker &&
+            blocker.faction === unit.faction &&
+            blocker.state.kind === "idle"
+          ) {
             this._nudgeUnit(blocker);
           }
         } else if (blocker && !isFinalTile) {

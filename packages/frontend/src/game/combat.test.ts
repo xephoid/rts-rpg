@@ -174,3 +174,102 @@ describe("faction elimination alert", () => {
     expect(alerts.some((m) => m.includes("Wizards eliminated"))).toBe(true);
   });
 });
+
+describe("worker-task preservation vs nudge", () => {
+  it("a constructing builder is not bumped off task when another unit tries to walk through", () => {
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+
+    // Real under-construction building so `_processConstruction` leaves the
+    // builder's state in `constructing` each tick — a fake state would get
+    // reset by the processor and we'd lose the signal we're testing for.
+    const bStats = wizardBuildingStats.cottage!;
+    const cottage = new BuildingEntity({
+      faction: "wizards",
+      typeKey: "cottage",
+      position: { x: 50, y: 50 },
+      stats: {
+        maxHp: bStats.hp, damage: 0, attackRange: 0,
+        sightRange: bStats.visionRange, speed: 0, charisma: 0, armor: 0,
+        capacity: bStats.occupantCapacity,
+      },
+      // Long construction window so the test doesn't race it.
+      constructionTicks: 1000,
+    });
+    // BuildingEntity defaults to underConstruction state — leave it.
+    engine.entities.add(cottage);
+
+    const sStats = wizardUnitStats.surf!;
+    const builder = new UnitEntity({
+      faction: "wizards",
+      typeKey: "surf",
+      position: { x: 52, y: 50 }, // adjacent to footprint
+      stats: {
+        maxHp: sStats.hp, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armor, capacity: sStats.capacity,
+      },
+    });
+    builder.state = { kind: "constructing", buildingId: cottage.id };
+    engine.entities.add(builder);
+
+    // Passerby on the other side tries to walk through the builder's tile.
+    const passer = new UnitEntity({
+      faction: "wizards",
+      typeKey: "surf",
+      position: { x: 54, y: 50 },
+      stats: {
+        maxHp: sStats.hp, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armor, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(passer);
+    engine.issueMoveOrder(passer.id, { x: 48, y: 50 });
+
+    for (let t = 0; t < 30; t++) engine.stepTick(t, t * 16);
+    expect(builder.state.kind).toBe("constructing");
+  });
+});
+
+describe("build site validation vs occupied tiles", () => {
+  it("rejects issueBuildOrder when a unit is standing on the target footprint", () => {
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+
+    // Builder at a known tile, and another unit sitting on the chosen site.
+    const sStats = wizardUnitStats.surf!;
+    const builder = new UnitEntity({
+      faction: "wizards",
+      typeKey: "surf",
+      position: { x: 40, y: 40 },
+      stats: {
+        maxHp: sStats.hp, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armor, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(builder);
+
+    const occupant = new UnitEntity({
+      faction: "wizards",
+      typeKey: "surf",
+      position: { x: 45, y: 45 }, // will be on the cottage's 2×2 footprint
+      stats: {
+        maxHp: sStats.hp, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armor, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(occupant);
+
+    const buildingsBefore = engine.entities.buildingsByFaction("wizards").length;
+    // Cottage is 2×2, topLeft (45,45) → footprint (45..46, 45..46). Occupant
+    // is on (45,45), so the build must be rejected.
+    engine.issueBuildOrder(builder.id, "cottage", { x: 45, y: 45 });
+    const buildingsAfter = engine.entities.buildingsByFaction("wizards").length;
+    expect(buildingsAfter).toBe(buildingsBefore);
+  });
+});
