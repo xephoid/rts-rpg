@@ -2,6 +2,8 @@
 // Kept in shared so /ui, /renderer, and tests all resolve the same strings.
 // Paths are relative to the frontend's /public/ (Vite serves this at /).
 
+import type { Species } from "../types/index.js";
+
 export const robotUnitAssets: Record<string, string> = {
   core: "/robot/units/core.png",
   motherboard: "/robot/units/motherboard.png",
@@ -69,13 +71,13 @@ export const wizardBuildingAssets: Record<string, string> = {
  * all call this to avoid drift between camelCase typeKeys and the actual snake_case
  * file names on disk.
  */
-export function unitSpritePath(faction: "wizards" | "robots", typeKey: string): string | undefined {
-  const map = faction === "wizards" ? wizardUnitAssets : robotUnitAssets;
+export function unitSpritePath(species: Species, typeKey: string): string | undefined {
+  const map = species === "wizards" ? wizardUnitAssets : robotUnitAssets;
   return map[typeKey];
 }
 
 /** Resolve a building sprite path for a given faction + typeKey. */
-export function buildingSpritePath(faction: "wizards" | "robots", typeKey: string): string | undefined {
-  const map = faction === "wizards" ? wizardBuildingAssets : robotBuildingAssets;
+export function buildingSpritePath(species: Species, typeKey: string): string | undefined {
+  const map = species === "wizards" ? wizardBuildingAssets : robotBuildingAssets;
   return map[typeKey];
 }

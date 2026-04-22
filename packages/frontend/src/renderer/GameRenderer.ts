@@ -2,8 +2,8 @@
 // No UI elements drawn here. No React imports.
 
 import { Application, Assets, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
-import type { Faction, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot, AttackEvent, SpellEvent } from "@neither/shared";
-import { robotBuildingStats, wizardBuildingStats, robotUnitStats, wizardUnitStats, buildingRequiresAdjacentWater, ROBOT_PLATFORM_TYPES } from "@neither/shared";
+import type { Faction, Species, GameStateSnapshot, TileSnapshot, FogSnapshot, EntitySnapshot, DepositSnapshot, AttackEvent, SpellEvent } from "@neither/shared";
+import { robotBuildingStats, wizardBuildingStats, robotUnitStats, wizardUnitStats, buildingRequiresAdjacentWater, ROBOT_PLATFORM_TYPES, factionColors } from "@neither/shared";
 import {
   terrainAssets,
   unitSpritePath,
@@ -91,6 +91,7 @@ export class GameRenderer {
    *  invisibility/disguise from selection + right-click target routing. */
   private lastDetectedIds = new Set<string>();
   private lastFog: FogSnapshot | null = null;
+  private lastFactionSpecies: Record<Faction, Species> | null = null;
   private selectedIds = new Set<string>();
   // Projectile + hit-flash effects
   private projectileContainer: Container | null = null;
@@ -220,6 +221,7 @@ export class GameRenderer {
     if (!this.tileContainer || !this.texturesLoaded) return;
     this.lastEntities = state.entities;
     this.lastFog = state.fog[this.activeFaction];
+    this.lastFactionSpecies = state.factionSpecies;
 
     // Auto-switch selection: if selected entity became a shell (Core entered platform), select the platform
     for (const id of [...this.selectedIds]) {
@@ -345,7 +347,7 @@ export class GameRenderer {
     this.territoryGfx.clear();
     const fog = this.lastFog;
     for (const [faction, segments] of this._territorySegments) {
-      const color = faction === "wizards" ? 0xa855f7 : 0xeab308;
+      const color = factionColors[faction];
       const isOwn = faction === this.activeFaction;
       for (const seg of segments) {
         // Opposing territory only visible where explored
@@ -433,16 +435,17 @@ export class GameRenderer {
    *  as one of their own units). Fallback tint uses the *displayed* faction so a
    *  missing sprite still shows the right team colour. */
   private _createEntitySpriteFor(displayFaction: Faction, displayTypeKey: string, entity: EntitySnapshot): Sprite {
+    const species: Species = this.lastFactionSpecies?.[displayFaction] ?? "wizards";
     const path =
       entity.kind === "building"
-        ? buildingSpritePath(displayFaction, displayTypeKey)
-        : unitSpritePath(displayFaction, displayTypeKey);
+        ? buildingSpritePath(species, displayTypeKey)
+        : unitSpritePath(species, displayTypeKey);
     let sprite: Sprite;
     try {
       sprite = path ? Sprite.from(path) : new Sprite();
     } catch {
       sprite = new Sprite();
-      sprite.tint = displayFaction === "wizards" ? 0xa855f7 : 0xeab308;
+      sprite.tint = factionColors[displayFaction];
     }
     return sprite;
   }

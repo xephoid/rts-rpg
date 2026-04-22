@@ -4,10 +4,15 @@ import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
 import styles from "./DiplomacyPanel.module.css";
 
-const OTHER_FACTIONS: Faction[] = ["wizards", "robots"];
-
 function factionLabel(f: Faction): string {
-  return f === "wizards" ? "Wizards" : "Robots";
+  switch (f) {
+    case "wizards": return "Wizards";
+    case "robots":  return "Robots";
+    case "f3":      return "Faction 3";
+    case "f4":      return "Faction 4";
+    case "f5":      return "Faction 5";
+    case "f6":      return "Faction 6";
+  }
 }
 
 function kindLabel(kind: DiplomaticProposalKind): string {
@@ -30,7 +35,7 @@ export function DiplomacyPanel() {
   const own = gameState.factionStats[activeFaction];
   const pending = gameState.diplomacy.pendingProposals;
   const incoming = pending.filter((p) => p.to === activeFaction);
-  const opposing = OTHER_FACTIONS.filter((f) => f !== activeFaction);
+  const opposing = gameState.activeFactions.filter((f) => f !== activeFaction);
 
   return (
     <div className={styles.panel}>

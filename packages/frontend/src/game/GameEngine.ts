@@ -1,10 +1,12 @@
 // Game simulation engine — pure TypeScript, no imports from /renderer, /ui, /store.
 // Pushes GameStateSnapshot to the store bridge after each tick via onTick callback.
 
-import type { Faction, FactionStats, GameStateSnapshot, Vec2, DepositSnapshot, AttackEvent, SpellEvent, DiplomaticProposal, DiplomaticProposalKind } from "@neither/shared";
+import type { Faction, FactionStats, FogSnapshot, GameStateSnapshot, Vec2, DepositSnapshot, AttackEvent, SpellEvent, DiplomaticProposal, DiplomaticProposalKind, Species } from "@neither/shared";
 import {
   startingResources,
   mapSizes,
+  factionCountBySize,
+  FACTION_IDS,
   robotBuildingStats,
   wizardBuildingStats,
   robotUnitStats,
@@ -75,7 +77,38 @@ export type GameEngineConfig = {
 
 export type ResourcePool = { wood: number; water: number; mana: number };
 
-const FACTIONS: Faction[] = ["wizards", "robots"];
+/**
+ * All 6 possible faction slots. Every `Record<Faction, X>` is declared with all
+ * six keys; slots beyond the active faction count carry zeroed defaults so the
+ * legacy 2-faction iteration patterns continue to work verbatim. Engine methods
+ * that should only touch active factions use `this.activeFactions` instead.
+ */
+const FACTIONS: Faction[] = ["wizards", "robots", "f3", "f4", "f5", "f6"];
+
+/** Build a `Record<Faction, T>` with a single default value for every slot. */
+function fullFactionRecord<T>(make: () => T): Record<Faction, T> {
+  return {
+    wizards: make(),
+    robots:  make(),
+    f3: make(),
+    f4: make(),
+    f5: make(),
+    f6: make(),
+  };
+}
+
+/** Seeded xorshift32 — mirrors MapGenerator's RNG so species rolls are reproducible
+ *  from the same seed. Falls back to Date.now() if no seed supplied. */
+function seededRng(seed?: number): () => number {
+  let s = ((seed ?? Date.now()) >>> 0) || 0xdeadbeef;
+  return () => {
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    return (s >>> 0) / 0x100000000;
+  };
+}
+
 /** Ticks a unit waits on a blocked waypoint before replanning (~167ms at 60 ticks/s). */
 const REPLAN_THRESHOLD = 10;
 /** Ticks a unit waits behind a moving blocker before replanning — handles head-on deadlocks (~333ms). */
@@ -116,10 +149,7 @@ export class GameEngine {
   private readonly fog: Record<Faction, FogOfWar>;
   private readonly lastSeen: Record<Faction, LastSeenMap>;
 
-  private readonly resources: Record<Faction, ResourcePool> = {
-    wizards: { ...startingResources },
-    robots: { ...startingResources },
-  };
+  private readonly resources: Record<Faction, ResourcePool> = fullFactionRecord(() => ({ ...startingResources }));
 
   /** depositId → unitId currently harvesting that deposit (one gatherer per tile). */
   private readonly depositOccupants = new Map<string, string>();
@@ -130,43 +160,39 @@ export class GameEngine {
   private _spellEvents: SpellEvent[] = [];
 
   /** Research items permanently unlocked per faction. */
-  private readonly _completedResearch = new Map<Faction, Set<string>>([
-    ["wizards", new Set<string>()],
-    ["robots",  new Set<string>()],
-  ]);
+  private readonly _completedResearch = new Map<Faction, Set<string>>(
+    FACTIONS.map((f) => [f, new Set<string>()]),
+  );
 
-  private readonly _ai: MilitaryAI | null;
+  /** One MilitaryAI per non-human active faction. Empty in headless mode (no
+   *  `playerFaction`). Each tick every AI runs independently. */
+  private readonly _ais: MilitaryAI[];
 
   // ── Phase 14 diplomacy state (persistent across ticks) ─────────────────────
   /** Bilateral alignment map. `_alignment[A][B]` is A's alignment toward B. Both
    *  directions are tracked so the spec's "how factions feel about each other"
    *  wording maps cleanly; combat + proposal adjustments touch both entries. */
-  private _alignment: Record<Faction, Record<Faction, number>> = {
-    wizards: { wizards: 0, robots: 0 },
-    robots:  { wizards: 0, robots: 0 },
-  };
+  private _alignment: Record<Faction, Record<Faction, number>> = fullFactionRecord(() => fullFactionRecord(() => 0));
   /** Bilateral — both directions flip together when an agreement is accepted. */
-  private _openBorders: Record<Faction, Record<Faction, boolean>> = {
-    wizards: { wizards: false, robots: false },
-    robots:  { wizards: false, robots: false },
-  };
+  private _openBorders: Record<Faction, Record<Faction, boolean>> = fullFactionRecord(() => fullFactionRecord(() => false));
   /** Bilateral — both directions flip together. Attack-blocking checks read this. */
-  private _nonCombatTreaties: Record<Faction, Record<Faction, boolean>> = {
-    wizards: { wizards: false, robots: false },
-    robots:  { wizards: false, robots: false },
-  };
+  private _nonCombatTreaties: Record<Faction, Record<Faction, boolean>> = fullFactionRecord(() => fullFactionRecord(() => false));
   private _pendingProposals: DiplomaticProposal[] = [];
   private _proposalIdCounter = 0;
   /** Snapshot of previous-tick alignment per faction, used to fire cross-threshold
    *  alerts once on transition rather than every tick while past the bound. */
-  private _prevAlignment: Record<Faction, Record<Faction, number>> = {
-    wizards: { wizards: 0, robots: 0 },
-    robots:  { wizards: 0, robots: 0 },
-  };
+  private _prevAlignment: Record<Faction, Record<Faction, number>> = fullFactionRecord(() => fullFactionRecord(() => 0));
   /** Which faction the human player is controlling (null for headless AI-vs-AI).
    *  Used to gate per-faction alerts — the player shouldn't get a notification every
    *  time the opposing AI finishes a research item, for instance. */
   private readonly playerFaction: Faction | null;
+  /** The factions actually participating in this match. Populated at construction
+   *  from `factionCountBySize[mapSize]`. First entry is the human `playerFaction`
+   *  (falls back to `"wizards"` for headless AI-vs-AI), remainder are AI slots. */
+  private readonly activeFactions: Faction[];
+  /** Species lookup per faction slot. Active slots get a random roll; inactive
+   *  slots carry defaults so every `Record<Faction, X>` is fully populated. */
+  private readonly factionSpecies: Record<Faction, Species>;
 
   constructor({ mapSize = "medium", seed, playerFaction, onTick, onAlert }: GameEngineConfig) {
     this.onTick = onTick;
@@ -178,32 +204,54 @@ export class GameEngine {
     this.grid = new Grid(size.widthTiles, size.heightTiles);
     this.spatialIndex = new SpatialIndex();
 
+    // Build the active-faction roster for this match. Player (if any) takes the
+    // first slot; the rest are AI. All slots keep their `FACTION_IDS` ordering
+    // so per-faction records iterate predictably.
+    const factionCount = factionCountBySize[mapSize];
+    const ordered: Faction[] = [];
+    if (playerFaction) ordered.push(playerFaction);
+    for (const f of FACTION_IDS) {
+      if (ordered.length >= factionCount) break;
+      if (!ordered.includes(f)) ordered.push(f);
+    }
+    this.activeFactions = ordered;
+
+    // Species: the two legacy slots keep their historical 1:1 mapping
+    // ("wizards" slot plays the wizard roster, "robots" plays the robot roster).
+    // Extension slots (f3..f6) get a random roll. Inactive slots carry a default
+    // so Record<Faction, X> iteration in legacy code stays safe.
+    const rng = seededRng(seed);
+    const species: Record<Faction, Species> = {
+      wizards: "wizards", robots: "robots",
+      f3: "wizards", f4: "wizards", f5: "wizards", f6: "wizards",
+    };
+    for (const f of this.activeFactions) {
+      if (f === "wizards" || f === "robots") continue;
+      species[f] = rng() < 0.5 ? "wizards" : "robots";
+    }
+    this.factionSpecies = species;
+
     const { deposits, startingPositions } = generateMap(this.grid, {
       size: mapSize,
       seed,
-      factionCount: 2,
+      factionCount,
     });
     this.deposits = deposits;
     this.startingPositions = startingPositions;
 
-    this.fog = {
-      wizards: new FogOfWar(size.widthTiles, size.heightTiles),
-      robots: new FogOfWar(size.widthTiles, size.heightTiles),
-    };
-    this.lastSeen = {
-      wizards: new LastSeenMap(),
-      robots: new LastSeenMap(),
-    };
+    this.fog = fullFactionRecord(() => new FogOfWar(size.widthTiles, size.heightTiles));
+    this.lastSeen = fullFactionRecord(() => new LastSeenMap());
 
     this._spawnStartingEntities();
     this.loop = new GameLoop(this.tick.bind(this));
 
-    if (playerFaction) {
-      const aiFaction: Faction = playerFaction === "wizards" ? "robots" : "wizards";
-      this._ai = new MilitaryAI(aiFaction);
-    } else {
-      this._ai = null;
-    }
+    // One MilitaryAI per non-human active faction. Headless runs (no player)
+    // skip AI entirely so tests can control the simulation directly.
+    this._ais = playerFaction
+      ? this.activeFactions
+          .filter((f) => f !== playerFaction)
+          .map((f) => new MilitaryAI(f, this.factionSpecies[f]))
+      : [];
   }
 
   getResources(faction: Faction): ResourcePool {
@@ -219,14 +267,23 @@ export class GameEngine {
   }
 
   private _spawnStartingEntities(): void {
-    const [wizPos, robPos] = this.startingPositions;
-    if (!wizPos || !robPos) return;
+    for (let i = 0; i < this.activeFactions.length; i++) {
+      const faction = this.activeFactions[i]!;
+      const pos = this.startingPositions[i];
+      if (!pos) continue;
+      if (this.factionSpecies[faction] === "wizards") {
+        this._spawnWizardStart(faction, pos);
+      } else {
+        this._spawnRobotStart(faction, pos);
+      }
+    }
+  }
 
-    // Wizard castle
-    const wizCastle = new BuildingEntity({
-      faction: "wizards",
+  private _spawnWizardStart(faction: Faction, pos: Vec2): void {
+    const castle = new BuildingEntity({
+      faction,
       typeKey: "castle",
-      position: { x: wizPos.x, y: wizPos.y },
+      position: { x: pos.x, y: pos.y },
       stats: {
         maxHp: wizardBuildingStats.castle!.hp,
         damage: 0,
@@ -239,16 +296,15 @@ export class GameEngine {
       },
       constructionTicks: 0,
     });
-    wizCastle.state = { kind: "operational" };
-    this.entities.add(wizCastle);
-    this._blockBuildingTiles(wizCastle);
+    castle.state = { kind: "operational" };
+    this.entities.add(castle);
+    this._blockBuildingTiles(castle);
 
-    // Named archmage leader — add before finding next tile so _findSpawnTile skips this position
     const archmageStats = wizardUnitStats[namedLeaders.wizards.typeKey]!;
     const archmage = new UnitEntity({
-      faction: "wizards",
+      faction,
       typeKey: namedLeaders.wizards.typeKey,
-      position: this._findSpawnTile(wizCastle) ?? { x: wizPos.x, y: wizPos.y + 4 },
+      position: this._findSpawnTile(castle) ?? { x: pos.x, y: pos.y + 4 },
       stats: {
         maxHp: archmageStats.hp,
         damage: archmageStats.damage,
@@ -267,13 +323,12 @@ export class GameEngine {
     });
     this.entities.add(archmage);
 
-    // 2 surfs flanking
     const surfStats = wizardUnitStats.surf!;
     for (let i = 0; i < 2; i++) {
       const surf = new UnitEntity({
-        faction: "wizards",
+        faction,
         typeKey: "surf",
-        position: this._findSpawnTile(wizCastle) ?? { x: wizPos.x + (i === 0 ? -1 : 1), y: wizPos.y + 4 },
+        position: this._findSpawnTile(castle) ?? { x: pos.x + (i === 0 ? -1 : 1), y: pos.y + 4 },
         stats: {
           maxHp: surfStats.hp,
           damage: surfStats.damage,
@@ -287,12 +342,13 @@ export class GameEngine {
       });
       this.entities.add(surf);
     }
+  }
 
-    // Robot home
-    const robHome = new BuildingEntity({
-      faction: "robots",
+  private _spawnRobotStart(faction: Faction, pos: Vec2): void {
+    const home = new BuildingEntity({
+      faction,
       typeKey: "home",
-      position: { x: robPos.x, y: robPos.y },
+      position: { x: pos.x, y: pos.y },
       stats: {
         maxHp: robotBuildingStats.home!.hp,
         damage: 0,
@@ -305,16 +361,15 @@ export class GameEngine {
       },
       constructionTicks: 0,
     });
-    robHome.state = { kind: "operational" };
-    this.entities.add(robHome);
-    this._blockBuildingTiles(robHome);
+    home.state = { kind: "operational" };
+    this.entities.add(home);
+    this._blockBuildingTiles(home);
 
-    // Named Motherboard leader — add before finding next tile
     const motherboardStats = robotUnitStats.motherboard!;
     const motherboard = new UnitEntity({
-      faction: "robots",
+      faction,
       typeKey: namedLeaders.robots.typeKey,
-      position: this._findSpawnTile(robHome) ?? { x: robPos.x, y: robPos.y + 4 },
+      position: this._findSpawnTile(home) ?? { x: pos.x, y: pos.y + 4 },
       stats: {
         maxHp: motherboardStats.hpWood,
         damage: motherboardStats.damage,
@@ -334,13 +389,12 @@ export class GameEngine {
     motherboard.materialType = "wood";
     this.entities.add(motherboard);
 
-    // 2 regular cores flanking
     const coreStats = robotUnitStats.core!;
     for (let i = 0; i < 2; i++) {
       const core = new UnitEntity({
-        faction: "robots",
+        faction,
         typeKey: "core",
-        position: this._findSpawnTile(robHome) ?? { x: robPos.x + (i === 0 ? -1 : 1), y: robPos.y + 4 },
+        position: this._findSpawnTile(home) ?? { x: pos.x + (i === 0 ? -1 : 1), y: pos.y + 4 },
         stats: {
           maxHp: coreStats.hpWood,
           damage: coreStats.damage,
@@ -2057,16 +2111,17 @@ export class GameEngine {
   // ── Production ────────────────────────────────────────────────────────────────
 
   private _processProduction(): void {
-    const costs = { wizards: wizardUnitCosts, robots: robotUnitCosts };
+    const costsBySpecies = { wizards: wizardUnitCosts, robots: robotUnitCosts };
     for (const building of this.entities.buildings()) {
       if (building.state.kind !== "producing") continue;
       building.state.progressTicks++;
       if (building.state.progressTicks >= building.state.totalTicks) {
         const { unitTypeKey } = building.state;
+        const costs = costsBySpecies[this.factionSpecies[building.faction]];
         // Dequeue next item before spawning so state is consistent
         if (building.productionQueue.length > 0) {
           const next = building.productionQueue.shift()!;
-          const nextCost = costs[building.faction][next];
+          const nextCost = costs[next];
           building.state = {
             kind: "producing",
             unitTypeKey: next,
@@ -3018,10 +3073,7 @@ export class GameEngine {
   }
 
   private _computePopulation(): Record<Faction, { count: number; cap: number }> {
-    const result: Record<Faction, { count: number; cap: number }> = {
-      wizards: { count: 0, cap: 0 },
-      robots: { count: 0, cap: 0 },
-    };
+    const result: Record<Faction, { count: number; cap: number }> = fullFactionRecord(() => ({ count: 0, cap: 0 }));
     for (const unit of this.entities.units()) {
       if (ROBOT_PLATFORM_TYPES.has(unit.typeKey)) continue; // platforms don't consume population
       result[unit.faction].count++;
@@ -3029,8 +3081,8 @@ export class GameEngine {
     }
     for (const building of this.entities.buildings()) {
       if (!building.isOperational) continue;
-      const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
-      const support = factionStats[building.typeKey]?.populationSupport ?? 0;
+      const speciesStats = this.factionSpecies[building.faction] === "wizards" ? wizardBuildingStats : robotBuildingStats;
+      const support = speciesStats[building.typeKey]?.populationSupport ?? 0;
       result[building.faction].cap += support;
     }
     return result;
@@ -3043,7 +3095,8 @@ export class GameEngine {
       openBorders: { ...this._openBorders[f] },
       nonCombatTreaties: { ...this._nonCombatTreaties[f] },
     });
-    const result: Record<Faction, FactionStats> = { wizards: mk("wizards"), robots: mk("robots") };
+    const result: Record<Faction, FactionStats> = fullFactionRecord<FactionStats>(() => mk("wizards"));
+    for (const f of FACTIONS) result[f] = mk(f);
     for (const unit of this.entities.units()) {
       if (unit.state.kind === "platformShell") continue;
       const role = unitRoles[unit.typeKey];
@@ -3054,7 +3107,7 @@ export class GameEngine {
     }
     for (const building of this.entities.buildings()) {
       if (!building.isOperational) continue;
-      const bStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+      const bStats = this.factionSpecies[building.faction] === "wizards" ? wizardBuildingStats : robotBuildingStats;
       const bs = bStats[building.typeKey];
       if (!bs) continue;
       const fs = result[building.faction];
@@ -3081,7 +3134,7 @@ export class GameEngine {
   // ── Fog ───────────────────────────────────────────────────────────────────────
 
   private tick(tick: number, elapsedMs: number): void {
-    this._ai?.tick(tick, this);
+    for (const ai of this._ais) ai.tick(tick, this);
     this._syncPassengerPositions();
     this._syncGarrisonedPositions();
     this._processFollowing();
@@ -3112,39 +3165,44 @@ export class GameEngine {
     // damage-site death handler being hit (e.g. buffs expiring on already-fatal wounds).
     this._cleanupDeadEntities();
 
+    const resourcesSnap = fullFactionRecord<ResourcePool>(() => ({ wood: 0, water: 0, mana: 0 }));
+    const fogSnap = fullFactionRecord<FogSnapshot>(() => this.fog.wizards.snapshot());
+    const completedSnap = fullFactionRecord<string[]>(() => []);
+    const detectedSnap = fullFactionRecord<string[]>(() => []);
+    const detectedIdsMap = this._computeDetectedIds();
+    for (const f of FACTIONS) {
+      resourcesSnap[f] = { ...this.resources[f] };
+      fogSnap[f] = this.fog[f].snapshot();
+      completedSnap[f] = [...(this._completedResearch.get(f) ?? [])];
+      detectedSnap[f] = detectedIdsMap[f];
+    }
+
     this.onTick({
       tick,
       elapsedMs,
-      resources: {
-        wizards: { ...this.resources.wizards },
-        robots: { ...this.resources.robots },
-      },
+      resources: resourcesSnap,
       entities: this.entities.toSnapshots(),
       tiles: this.grid.toSnapshots(),
-      fog: {
-        wizards: this.fog.wizards.snapshot(),
-        robots: this.fog.robots.snapshot(),
-      },
+      fog: fogSnap,
       population: this._computePopulation(),
       deposits: this._buildDepositSnapshots(),
-      completedResearch: {
-        wizards: [...(this._completedResearch.get("wizards") ?? [])],
-        robots:  [...(this._completedResearch.get("robots")  ?? [])],
-      },
+      completedResearch: completedSnap,
       attacks: this._attackEvents.splice(0),
       spells: this._spellEvents.splice(0),
       factionStats: this._computeFactionStats(),
-      detectedIds: this._computeDetectedIds(),
+      detectedIds: detectedSnap,
       diplomacy: { pendingProposals: [...this._pendingProposals] },
+      factionSpecies: { ...this.factionSpecies },
+      activeFactions: [...this.activeFactions],
     });
   }
 
   /** Cached per-viewer reveal set populated by `_refreshDetectedIds` each tick. */
-  private _detectedIdsThisTick: Record<Faction, Set<string>> = { wizards: new Set(), robots: new Set() };
+  private _detectedIdsThisTick: Record<Faction, Set<string>> = fullFactionRecord(() => new Set<string>());
   /** Per-unit last-tick detection state — used to fire an alert on the transition
    *  from hidden → revealed so the owning player knows their spy was spotted
    *  without spamming the alert log every tick the detector stays in range. */
-  private _previousDetectedIds: Record<Faction, Set<string>> = { wizards: new Set(), robots: new Set() };
+  private _previousDetectedIds: Record<Faction, Set<string>> = fullFactionRecord(() => new Set<string>());
 
   /**
    * For each faction F, every F-owned detector unit scans opposing-faction units
@@ -3245,10 +3303,9 @@ export class GameEngine {
   }
 
   private _computeDetectedIds(): Record<Faction, string[]> {
-    return {
-      wizards: [...this._detectedIdsThisTick.wizards],
-      robots: [...this._detectedIdsThisTick.robots],
-    };
+    const out = fullFactionRecord<string[]>(() => []);
+    for (const f of FACTIONS) out[f] = [...this._detectedIdsThisTick[f]];
+    return out;
   }
 
   /**

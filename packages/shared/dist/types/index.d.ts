@@ -1,4 +1,22 @@
-export type Faction = "wizards" | "robots";
+/**
+ * Faction = one player slot (human or AI). Up to 6 slots; match size scales with
+ * map: 2 (small), 4 (medium), 6 (large). Each faction has a `species` — wizards
+ * or robots — which determines its unit/building roster. Species is tracked
+ * separately (see `Species`) because two factions can share a species (e.g., two
+ * independent wizard players). All per-faction engine state uses `Record<Faction, X>`
+ * with every slot pre-populated; inactive slots carry default values so the
+ * iteration patterns in legacy 2-faction code continue to work unchanged.
+ *
+ * Naming: the first two slots keep their historical literals `"wizards"` and
+ * `"robots"` so pre-N-faction tests/UI keep compiling. Slots 3-6 are `"f3"`..`"f6"`.
+ */
+export type Faction = "wizards" | "robots" | "f3" | "f4" | "f5" | "f6";
+/** All possible faction slots, in declared order. Use `activeFactions` from the
+ *  engine snapshot for the subset actually participating in a given match. */
+export declare const FACTION_IDS: readonly Faction[];
+/** Race / unit-roster identity. One of two possible values; multiple factions
+ *  can share a species (e.g., a 3-wizard free-for-all). */
+export type Species = "wizards" | "robots";
 export type TerrainType = "open" | "forest" | "water";
 export type EntityKind = "unit" | "building";
 export type Vec2 = {
@@ -210,5 +228,11 @@ export type GameStateSnapshot = {
     diplomacy: {
         pendingProposals: DiplomaticProposal[];
     };
+    /** Which species each faction is playing. Inactive slots default to `"wizards"`
+     *  but should be filtered by `activeFactions` before display. */
+    factionSpecies: Record<Faction, Species>;
+    /** The factions actually participating in this match (2, 4, or 6 depending on
+     *  map size). Renderer + UI iterate this instead of every possible slot. */
+    activeFactions: Faction[];
 };
 //# sourceMappingURL=index.d.ts.map

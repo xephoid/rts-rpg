@@ -33,6 +33,22 @@ function spawnSpitter(engine: GameEngine, faction: "robots" | "wizards" = "robot
   return u;
 }
 
+describe("Phase 14 — N-faction framework", () => {
+  it("activeFactions scales with map size: small=2, medium=4, large=6", () => {
+    const sizes = [
+      ["small", 2],
+      ["medium", 4],
+      ["large", 6],
+    ] as const;
+    for (const [mapSize, expected] of sizes) {
+      let snapshot: { activeFactions: string[] } | null = null;
+      new GameEngine({ mapSize, seed: 1, onTick: (s) => { snapshot = s; } }).stepTick(0, 0);
+      const snap = snapshot as { activeFactions: string[] } | null;
+      expect(snap?.activeFactions.length).toBe(expected);
+    }
+  });
+});
+
 describe("Phase 14 — Diplomacy", () => {
   it("proposing open borders above AI accept threshold sets bilateral flags + shared vision", () => {
     const engine = makeEngine(diplomacyConfig.aiAcceptThreshold + 5);
@@ -125,9 +141,23 @@ describe("Phase 14 — Diplomacy", () => {
 
   it("combat damage lowers alignment of the attacked faction", () => {
     const engine = makeEngine();
-    const attacker = spawnSpitter(engine, "wizards", { x: 10, y: 10 });
-    attacker.typeKey = "evoker"; // lightweight reuse; using evoker-like damage output
+    // Use an evoker (wizard roster) vs a spitter so the attacker is a valid
+    // wizard-faction unit that can actually fire.
+    const wStats = wizardUnitStats.evoker!;
+    const attacker = new UnitEntity({
+      faction: "wizards",
+      typeKey: "evoker",
+      position: { x: 10, y: 10 },
+      stats: {
+        maxHp: wStats.hp, damage: wStats.damage,
+        attackRange: wStats.attackRange, sightRange: wStats.sightRange,
+        speed: wStats.speed, charisma: wStats.charisma,
+        armor: wStats.armor, capacity: wStats.capacity,
+      },
+    });
+    engine.entities.add(attacker);
     const target = spawnSpitter(engine, "robots", { x: 11, y: 10 });
+    target.attachedCoreId = "fake"; // robot platform needs a Core to count as attackable
     engine.issueAttackOrder(attacker.id, target.id);
     for (let t = 0; t < 60; t++) engine.stepTick(t, t * 16);
     // The robot faction should now have lower alignment toward wizards than zero.
@@ -156,7 +186,7 @@ describe("Phase 14 — Diplomacy", () => {
     robot.attachedCoreId = "fake"; // grant full sightRange via the non-unattached path
     engine.stepTick(0, 0);
     const idx = 40 * 64 + 40;
-    const preData = fogSnapshot as Uint8Array | number[];
+    const preData = fogSnapshot as unknown as Uint8Array | number[];
     const pre = preData[idx] ?? 0;
     expect(pre).toBe(0);
 
@@ -166,7 +196,7 @@ describe("Phase 14 — Diplomacy", () => {
     engine.issueRespondToProposal(proposal.id, true);
     engine.stepTick(1, 16);
 
-    const postData = fogSnapshot as Uint8Array | number[];
+    const postData = fogSnapshot as unknown as Uint8Array | number[];
     const post = postData[idx] ?? 0;
     expect(post).toBeGreaterThan(0);
   });

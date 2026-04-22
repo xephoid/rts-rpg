@@ -15,7 +15,7 @@
  * as a panic override when the base is overrun.
  */
 
-import type { Faction, Vec2 } from "@neither/shared";
+import type { Faction, Species, Vec2 } from "@neither/shared";
 import {
   aiParameters,
   buildingProduction,
@@ -105,7 +105,7 @@ interface FactionRoles {
   researchPriority: readonly string[];
 }
 
-const FACTION_ROLES: Record<Faction, FactionRoles> = {
+const SPECIES_ROLES: Record<Species, FactionRoles> = {
   wizards: {
     home: "castle",
     builder: "surf",
@@ -276,14 +276,16 @@ const AI_LOG = true;
 
 export class MilitaryAI {
   private readonly faction: Faction;
+  private readonly species: Species;
   private mode: AIMode = "economy";
   private lastTickProcessed = -9999;
   private rallyPoint: Vec2 | null = null;
   private inAttack = false;
   private hasScouted = false;
 
-  constructor(faction: Faction) {
+  constructor(faction: Faction, species: Species) {
     this.faction = faction;
+    this.species = species;
   }
 
   private _log(msg: string): void {
@@ -337,7 +339,7 @@ export class MilitaryAI {
       case "turtle":   this._turtleMode(engine, ctx); break;
     }
 
-    if (this.faction === "robots") {
+    if (this.species === "robots") {
       this._robotAssignCores(engine, ctx);
     } else {
       this._garrisonWizardTowers(engine, ctx);
@@ -367,7 +369,7 @@ export class MilitaryAI {
     const pop = engine.getPopulation(this.faction);
     const enemies = engine.entities.all().filter((e) => e.faction !== this.faction);
 
-    const homeKey = FACTION_ROLES[this.faction].home;
+    const homeKey = SPECIES_ROLES[this.species].home;
     const home =
       buildings.find((b) => b.typeKey === homeKey && b.isOperational) ??
       buildings.find((b) => b.typeKey === homeKey) ??
@@ -406,7 +408,7 @@ export class MilitaryAI {
   /** Union of army + turtle composition typeKeys for this faction. */
   private _combatTypes(): Set<string> {
     const set = new Set<string>();
-    const comps = this.faction === "wizards"
+    const comps = this.species === "wizards"
       ? [WIZARD_ARMY_COMPOSITION, WIZARD_TURTLE_COMPOSITION]
       : [ROBOT_ARMY_COMPOSITION, ROBOT_TURTLE_COMPOSITION];
     for (const comp of comps) for (const e of comp) set.add(e.typeKey);
@@ -416,7 +418,7 @@ export class MilitaryAI {
   /** Robot combat platforms need an attached Core to act; wizards have no attach concept. */
   private _isCombatReady(u: UnitEntity, combatTypes: Set<string>): boolean {
     if (!combatTypes.has(u.typeKey)) return false;
-    if (this.faction === "robots" && !u.attachedCoreId) return false;
+    if (this.species === "robots" && !u.attachedCoreId) return false;
     return true;
   }
 
@@ -439,11 +441,11 @@ export class MilitaryAI {
   }
 
   private _hasMinGatherers(ctx: Ctx): boolean {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     for (const gt of roles.gatherers) {
       const count = ctx.units.filter((u) => {
         if (u.typeKey !== gt) return false;
-        if (this.faction === "robots" && !u.attachedCoreId) return false;
+        if (this.species === "robots" && !u.attachedCoreId) return false;
         return true;
       }).length;
       if (count < roles.minPerGatherer) return false;
@@ -502,7 +504,7 @@ export class MilitaryAI {
   // ── Economy ───────────────────────────────────────────────────────────────
 
   private _maintainEconomy(engine: AIEngineInterface, ctx: Ctx): void {
-    if (this.faction === "wizards") this._maintainWizardEconomy(engine, ctx);
+    if (this.species === "wizards") this._maintainWizardEconomy(engine, ctx);
     else this._maintainRobotEconomy(engine, ctx);
 
     if (ctx.pop.count >= ctx.pop.cap - POP_HEADROOM) this._buildPopSupport(engine, ctx);
@@ -518,7 +520,7 @@ export class MilitaryAI {
    *    2. That far deposit still has meaningful quantity remaining.
    *  Capped at `MAX_WOOD_STORAGE` to prevent the AI from carpeting the map. */
   private _maybeBuildWoodStorage(engine: AIEngineInterface, ctx: Ctx): void {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const storageKey = roles.woodStorage;
     if (!storageKey) return;
 
@@ -567,7 +569,7 @@ export class MilitaryAI {
     if (!farDeposit || farDist < WOOD_STORAGE_MIN_DIST) return;
 
     // Place the storage near the far deposit so gatherers drop off locally.
-    if (this.faction === "wizards") {
+    if (this.species === "wizards") {
       this._wizardBuild(engine, ctx, storageKey, farDeposit.position);
     } else {
       this._robotBuild(engine, ctx, storageKey, farDeposit.position);
@@ -575,7 +577,7 @@ export class MilitaryAI {
   }
 
   private _maintainWizardEconomy(engine: AIEngineInterface, ctx: Ctx): void {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const gatherer = roles.gatherers[0]!; // wizards have one gatherer type
     const castles = ctx.buildings.filter((b) => b.typeKey === roles.home && b.isOperational);
 
@@ -607,7 +609,7 @@ export class MilitaryAI {
   }
 
   private _maintainRobotEconomy(engine: AIEngineInterface, ctx: Ctx): void {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const homes = ctx.buildings.filter((b) => b.typeKey === roles.home && b.isOperational);
     const gathererSet = new Set(roles.gatherers);
     const hasBuilder = ctx.units.some((u) => u.typeKey === roles.builder);
@@ -691,11 +693,11 @@ export class MilitaryAI {
   }
 
   private _buildPopSupport(engine: AIEngineInterface, ctx: Ctx): void {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const typeKey = roles.popSupport;
     if (ctx.buildings.some((b) => b.typeKey === typeKey && !b.isOperational)) return;
 
-    if (this.faction === "wizards") {
+    if (this.species === "wizards") {
       this._wizardBuild(engine, ctx, typeKey);
       return;
     }
@@ -744,7 +746,7 @@ export class MilitaryAI {
   }
 
   private _composition(): readonly CompEntry[] {
-    if (this.faction === "wizards") {
+    if (this.species === "wizards") {
       return this.mode === "turtle" ? WIZARD_TURTLE_COMPOSITION : WIZARD_ARMY_COMPOSITION;
     }
     return this.mode === "turtle" ? ROBOT_TURTLE_COMPOSITION : ROBOT_ARMY_COMPOSITION;
@@ -769,8 +771,8 @@ export class MilitaryAI {
     ctx: Ctx,
     comp: readonly CompEntry[],
   ): void {
-    if (this.faction === "robots") {
-      const roles = FACTION_ROLES[this.faction];
+    if (this.species === "robots") {
+      const roles = SPECIES_ROLES[this.species];
       const unattachedCombat = ctx.units.filter(
         (u) =>
           (ctx.combatTypes.has(u.typeKey) || u.typeKey === roles.builder) &&
@@ -845,7 +847,7 @@ export class MilitaryAI {
   // ── Defensive buildings ──────────────────────────────────────────────────
 
   private _buildDefenses(engine: AIEngineInterface, ctx: Ctx): void {
-    const typeKey = FACTION_ROLES[this.faction].defense;
+    const typeKey = SPECIES_ROLES[this.species].defense;
     const existing = ctx.buildings.filter((b) => b.typeKey === typeKey).length;
 
     // Tower count grows with army size — prevents the AI from spending all early wood
@@ -856,7 +858,7 @@ export class MilitaryAI {
     if (ctx.buildings.some((b) => b.typeKey === typeKey && !b.isOperational)) return;
     if (ctx.resources.wood < DEFENSE_WOOD_RESERVE || ctx.resources.water < DEFENSE_WATER_RESERVE) return;
 
-    if (this.faction === "wizards") {
+    if (this.species === "wizards") {
       this._wizardBuild(engine, ctx, typeKey);
     } else {
       this._robotBuild(engine, ctx, typeKey);
@@ -867,7 +869,7 @@ export class MilitaryAI {
    *  given host typeKey this tick — used by maintenance logic to pause non-critical
    *  queueing on that host so its queue drains and research can actually start. */
   private _hasPendingResearchAt(hostTypeKey: string, ctx: Ctx): boolean {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     for (const researchKey of roles.researchPriority) {
       const cost = researchCosts[researchKey as keyof typeof researchCosts];
       if (!cost) continue;
@@ -896,7 +898,7 @@ export class MilitaryAI {
    * mid-research are skipped automatically by the engine's `issueResearchOrder`.
    */
   private _advanceResearchPriority(engine: AIEngineInterface, ctx: Ctx): void {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     for (const researchKey of roles.researchPriority) {
       const cost = researchCosts[researchKey as keyof typeof researchCosts];
       if (!cost) continue;
@@ -929,14 +931,14 @@ export class MilitaryAI {
    */
   private _buildTechUnlocks(engine: AIEngineInterface, ctx: Ctx): void {
     const priority = this._techPriorityList();
-    const costs = this.faction === "wizards" ? wizardBuildingCosts : robotBuildingCosts;
+    const costs = this.species === "wizards" ? wizardBuildingCosts : robotBuildingCosts;
 
     for (const typeKey of priority) {
       if (ctx.buildings.some((b) => b.typeKey === typeKey)) continue; // live or under construction
       const cost = costs[typeKey];
       if (!cost) continue;
       if (ctx.resources.wood < cost.wood + 30 || ctx.resources.water < cost.water + 15) return;
-      if (this.faction === "wizards") this._wizardBuild(engine, ctx, typeKey);
+      if (this.species === "wizards") this._wizardBuild(engine, ctx, typeKey);
       else this._robotBuild(engine, ctx, typeKey);
       return; // one tech build per tick
     }
@@ -950,9 +952,9 @@ export class MilitaryAI {
    * economy/maintenance logic already handles them.
    */
   private _techPriorityList(): string[] {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const autoBuilt = new Set(roles.autoBuilt);
-    const comps = this.faction === "wizards"
+    const comps = this.species === "wizards"
       ? [WIZARD_ARMY_COMPOSITION, WIZARD_TURTLE_COMPOSITION]
       : [ROBOT_ARMY_COMPOSITION, ROBOT_TURTLE_COMPOSITION];
 
@@ -985,7 +987,7 @@ export class MilitaryAI {
    * remain active so at least one keeps supplying resources.
    */
   private _wizardBuild(engine: AIEngineInterface, ctx: Ctx, typeKey: string, near?: Vec2): void {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const surfs = ctx.units.filter((u) => u.typeKey === roles.builder);
     const activeGatherers = surfs.filter(
       (u) =>
@@ -1009,7 +1011,7 @@ export class MilitaryAI {
 
   /** Returns true if a build order was successfully issued. */
   private _robotBuild(engine: AIEngineInterface, ctx: Ctx, typeKey: string, near?: Vec2): boolean {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const builder = ctx.units.find(
       (u) => u.typeKey === roles.builder && u.attachedCoreId && u.state.kind === "idle",
     );
@@ -1038,10 +1040,10 @@ export class MilitaryAI {
   }
 
   private _scout(engine: AIEngineInterface, ctx: Ctx): void {
-    const scoutType = FACTION_ROLES[this.faction].scout;
+    const scoutType = SPECIES_ROLES[this.species].scout;
     const scout = ctx.units.find((u) => {
       if (u.typeKey !== scoutType || u.state.kind !== "idle") return false;
-      if (this.faction === "robots" && !u.attachedCoreId) return false;
+      if (this.species === "robots" && !u.attachedCoreId) return false;
       return true;
     });
     if (!scout) return;
@@ -1074,7 +1076,7 @@ export class MilitaryAI {
   }
 
   private _hideLeader(engine: AIEngineInterface, ctx: Ctx): void {
-    const leaderTypeKey = namedLeaders[this.faction].typeKey;
+    const leaderTypeKey = namedLeaders[this.species].typeKey;
     const leader = ctx.units.find((u) => u.typeKey === leaderTypeKey);
     if (!leader) return;
     if (leader.state.kind !== "idle") return;
@@ -1098,7 +1100,7 @@ export class MilitaryAI {
   }
 
   private _garrisonWizardTowers(engine: AIEngineInterface, ctx: Ctx): void {
-    const defenseKey = FACTION_ROLES[this.faction].defense;
+    const defenseKey = SPECIES_ROLES[this.species].defense;
     const empty = ctx.buildings.filter(
       (b) => b.typeKey === defenseKey && b.isOperational && !b.garrisonedUnitId,
     );
@@ -1127,7 +1129,7 @@ export class MilitaryAI {
    * also tracks which platform an en-route Core is already heading for so we don't
    * send TWO Cores to the same target (only the first to arrive actually attaches). */
   private _robotAssignCores(engine: AIEngineInterface, ctx: Ctx): void {
-    const roles = FACTION_ROLES[this.faction];
+    const roles = SPECIES_ROLES[this.species];
     const gathererSet = new Set(roles.gatherers);
     const freeCores = ctx.units.filter(
       (u) =>
@@ -1195,14 +1197,14 @@ export class MilitaryAI {
   // ── Rally point / shared math ────────────────────────────────────────────
 
   private _homeCenter(home: BuildingEntity): Vec2 {
-    const stats = this.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const stats = this.species === "wizards" ? wizardBuildingStats : robotBuildingStats;
     const fp = stats[home.typeKey]?.footprintTiles ?? 2;
     return { x: home.position.x + fp / 2, y: home.position.y + fp / 2 };
   }
 
   private _ensureRallyPoint(engine: AIEngineInterface, buildings: BuildingEntity[]): void {
     if (this.rallyPoint) return;
-    const homeKey = FACTION_ROLES[this.faction].home;
+    const homeKey = SPECIES_ROLES[this.species].home;
     const home = buildings.find((b) => b.typeKey === homeKey);
     if (!home) return;
 
@@ -1214,7 +1216,7 @@ export class MilitaryAI {
     const len = Math.max(1, Math.hypot(dx, dy));
     const ux = dx / len;
     const uy = dy / len;
-    const stats = this.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const stats = this.species === "wizards" ? wizardBuildingStats : robotBuildingStats;
     const fp = stats[home.typeKey]?.footprintTiles ?? 2;
     const step = fp / 2 + 3;
     const ideal = {

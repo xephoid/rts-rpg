@@ -163,7 +163,7 @@ export function CommandsPanel() {
                   }
                 >
                   <img
-                    src={unitSpritePath(entity.faction, typeKey)}
+                    src={unitSpritePath(gameState.factionSpecies[entity.faction], typeKey)}
                     className={styles.prodIcon}
                     alt={formatTypeKey(typeKey)}
                     onError={(e) => { e.currentTarget.style.display = "none"; }}

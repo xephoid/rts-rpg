@@ -6,6 +6,8 @@
 // manifest instead of string-templating (which would silently break for any
 // multi-word robot typeKey whose actual file is snake_case).
 
+import type { Species } from "../types/index.js";
+
 /** Maps building typeKey → list of unit typeKeys it can produce. */
 export const buildingProduction: Record<string, string[]> = {
   // Robot buildings — each research building IS the production building for its unit type
@@ -82,7 +84,7 @@ export const buildingResearch: Record<string, string[]> = {
 };
 
 /** Buildings a builder can construct. Includes additional main bases (spec: no limit on Castles/Homes). */
-export const factionBuildableBuildings: Record<"wizards" | "robots", string[]> = {
+export const factionBuildableBuildings: Record<Species, string[]> = {
   wizards: [
     "castle",
     "cottage", "wall", "wizardTower", "watermill", "logCabin", "manaReservoir",

@@ -1,3 +1,4 @@
+import type { Species } from "../types/index.js";
 /** Maps building typeKey → list of unit typeKeys it can produce. */
 export declare const buildingProduction: Record<string, string[]>;
 /** Unit types that can be ordered to construct a building. */
@@ -34,7 +35,7 @@ export declare const unitBuildingRequirements: Record<string, string>;
 /** Maps building typeKey → list of researchable item keys available at that building. */
 export declare const buildingResearch: Record<string, string[]>;
 /** Buildings a builder can construct. Includes additional main bases (spec: no limit on Castles/Homes). */
-export declare const factionBuildableBuildings: Record<"wizards" | "robots", string[]>;
+export declare const factionBuildableBuildings: Record<Species, string[]>;
 export type BuildingStatBlock = {
     hp: number;
     occupantCapacity: number;

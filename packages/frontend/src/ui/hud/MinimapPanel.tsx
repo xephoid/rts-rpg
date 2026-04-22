@@ -1,7 +1,15 @@
 import { useEffect, useRef } from "react";
+import { factionColors } from "@neither/shared";
 import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
 import styles from "./MinimapPanel.module.css";
+
+function hexToCss(n: number, alpha = 1): string {
+  const r = (n >> 16) & 0xff;
+  const g = (n >> 8) & 0xff;
+  const b = n & 0xff;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 const CANVAS_SIZE = 188;
 // Matches GameRenderer.TILE_SIZE — rendering constant, not a game balance value.
@@ -67,9 +75,7 @@ export function MinimapPanel() {
       if (entity.kind !== "building" || entity.buildingState === "underConstruction") continue;
       const visibility = fog.data[Math.floor(entity.position.y) * fog.width + Math.floor(entity.position.x)] ?? 0;
       if (visibility === 0) continue;
-      ctx.fillStyle = entity.faction === "wizards"
-        ? "rgba(168, 85, 247, 0.25)"
-        : "rgba(234, 179, 8, 0.25)";
+      ctx.fillStyle = hexToCss(factionColors[entity.faction], 0.25);
       ctx.fillRect(
         Math.floor(entity.position.x * scale),
         Math.floor(entity.position.y * scale),
@@ -87,7 +93,7 @@ export function MinimapPanel() {
       const visibility = fog.data[tileY * fog.width + tileX] ?? 0;
       if (visibility !== 2) continue;
 
-      ctx.fillStyle = entity.faction === "wizards" ? "#a855f7" : "#eab308";
+      ctx.fillStyle = hexToCss(factionColors[entity.faction]);
       ctx.fillRect(
         Math.floor(entity.position.x * scale),
         Math.floor(entity.position.y * scale),

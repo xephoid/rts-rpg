@@ -42,4 +42,9 @@ export declare const spawnWoodGuarantee: {
     radiusTiles: number;
     minDeposits: number;
 };
+/**
+ * How many factions (slots) each map size hosts. One is the human player,
+ * the rest are AI. Small stays as the legacy 1-v-1; medium + large add NPCs.
+ */
+export declare const factionCountBySize: Record<"small" | "medium" | "large", number>;
 //# sourceMappingURL=mapConfig.d.ts.map

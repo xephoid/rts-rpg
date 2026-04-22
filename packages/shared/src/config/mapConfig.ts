@@ -45,3 +45,13 @@ export const spawnWoodGuarantee = {
   radiusTiles: 12,   // Initial guess: ~15s Surf round trip
   minDeposits: 3,    // Initial guess: ~750 wood, covers early build-out
 };
+
+/**
+ * How many factions (slots) each map size hosts. One is the human player,
+ * the rest are AI. Small stays as the legacy 1-v-1; medium + large add NPCs.
+ */
+export const factionCountBySize: Record<"small" | "medium" | "large", number> = {
+  small: 2,  // Confirmed: historical 1-v-1
+  medium: 4, // Initial guess
+  large: 6,  // Initial guess
+};
