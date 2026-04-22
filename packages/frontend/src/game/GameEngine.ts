@@ -139,10 +139,15 @@ export class GameEngine {
   ]);
 
   private readonly _ai: MilitaryAI | null;
+  /** Which faction the human player is controlling (null for headless AI-vs-AI).
+   *  Used to gate per-faction alerts — the player shouldn't get a notification every
+   *  time the opposing AI finishes a research item, for instance. */
+  private readonly playerFaction: Faction | null;
 
   constructor({ mapSize = "medium", seed, playerFaction, onTick, onAlert }: GameEngineConfig) {
     this.onTick = onTick;
     this.onAlert = onAlert;
+    this.playerFaction = playerFaction ?? null;
     this.entities = new EntityManager();
     this.events = new EventBus();
     const size = mapSizes[mapSize];
@@ -2121,9 +2126,20 @@ export class GameEngine {
       const done = building.advanceResearch();
       if (done) {
         this._completedResearch.get(faction)?.add(researchKey);
-        this.onAlert?.(`Research complete: ${researchKey}`);
+        // Only notify the player about their OWN research completing. The opposing
+        // AI's upgrades aren't the player's concern at the alert layer.
+        if (this._isPlayerFaction(faction)) {
+          this.onAlert?.(`Research complete: ${researchKey}`);
+        }
       }
     }
+  }
+
+  /** True when `faction` matches the human player. In headless AI-vs-AI mode
+   *  (playerFaction === null) every faction is effectively "the player" so alerts
+   *  fire for all. */
+  private _isPlayerFaction(faction: Faction): boolean {
+    return this.playerFaction === null || this.playerFaction === faction;
   }
 
   // ── Combat ───────────────────────────────────────────────────────────────────
@@ -2310,7 +2326,9 @@ export class GameEngine {
       }
       if (killerId) this.giveXp(killerId, xpRates.killEnemy);
       this.entities.remove(entity.id);
-      this.onAlert?.(`${entity.typeKey} destroyed`);
+      if (this._isPlayerFaction(entity.faction)) {
+        this.onAlert?.(`${entity.typeKey} destroyed`);
+      }
       if (entity.isNamed) {
         // Determine killer's faction for victory credit
         const killer = killerId ? this.entities.get(killerId) : null;
@@ -2334,7 +2352,9 @@ export class GameEngine {
         }
       }
       this.entities.remove(entity.id);
-      this.onAlert?.(`${entity.typeKey} destroyed`);
+      if (this._isPlayerFaction(entity.faction)) {
+        this.onAlert?.(`${entity.typeKey} destroyed`);
+      }
     }
   }
 
@@ -2980,11 +3000,15 @@ export class GameEngine {
             culpritDist = dSq;
           }
         }
-        const base = uiText.spy.alertDetected(u.name ?? u.typeKey);
-        const detail = culprit
-          ? ` (${culprit.typeKey} at dist ${Math.sqrt(culpritDist).toFixed(1)})`
-          : "";
-        this.onAlert?.(base + detail);
+        // Only the spy's owner needs "you were spotted" — the detector's owner can
+        // already see the revealed unit on the map.
+        if (this._isPlayerFaction(u.faction)) {
+          const base = uiText.spy.alertDetected(u.name ?? u.typeKey);
+          const detail = culprit
+            ? ` (${culprit.typeKey} at dist ${Math.sqrt(culpritDist).toFixed(1)})`
+            : "";
+          this.onAlert?.(base + detail);
+        }
       }
       this._previousDetectedIds[viewer] = new Set(curr);
     }
