@@ -1,7 +1,7 @@
 // Game simulation engine — pure TypeScript, no imports from /renderer, /ui, /store.
 // Pushes GameStateSnapshot to the store bridge after each tick via onTick callback.
 
-import type { Faction, FactionStats, GameStateSnapshot, Vec2, DepositSnapshot, AttackEvent, SpellEvent } from "@neither/shared";
+import type { Faction, FactionStats, GameStateSnapshot, Vec2, DepositSnapshot, AttackEvent, SpellEvent, DiplomaticProposal, DiplomaticProposalKind } from "@neither/shared";
 import {
   startingResources,
   mapSizes,
@@ -49,6 +49,7 @@ import {
   hidingBuildingConfig,
   ROBOT_PLATFORM_TYPES,
   uiText,
+  diplomacy as diplomacyConfig,
 } from "@neither/shared";
 import { GameLoop, TICK_MS } from "./loop/GameLoop.js";
 import { EntityManager } from "./entities/EntityManager.js";
@@ -135,6 +136,33 @@ export class GameEngine {
   ]);
 
   private readonly _ai: MilitaryAI | null;
+
+  // ── Phase 14 diplomacy state (persistent across ticks) ─────────────────────
+  /** Bilateral alignment map. `_alignment[A][B]` is A's alignment toward B. Both
+   *  directions are tracked so the spec's "how factions feel about each other"
+   *  wording maps cleanly; combat + proposal adjustments touch both entries. */
+  private _alignment: Record<Faction, Record<Faction, number>> = {
+    wizards: { wizards: 0, robots: 0 },
+    robots:  { wizards: 0, robots: 0 },
+  };
+  /** Bilateral — both directions flip together when an agreement is accepted. */
+  private _openBorders: Record<Faction, Record<Faction, boolean>> = {
+    wizards: { wizards: false, robots: false },
+    robots:  { wizards: false, robots: false },
+  };
+  /** Bilateral — both directions flip together. Attack-blocking checks read this. */
+  private _nonCombatTreaties: Record<Faction, Record<Faction, boolean>> = {
+    wizards: { wizards: false, robots: false },
+    robots:  { wizards: false, robots: false },
+  };
+  private _pendingProposals: DiplomaticProposal[] = [];
+  private _proposalIdCounter = 0;
+  /** Snapshot of previous-tick alignment per faction, used to fire cross-threshold
+   *  alerts once on transition rather than every tick while past the bound. */
+  private _prevAlignment: Record<Faction, Record<Faction, number>> = {
+    wizards: { wizards: 0, robots: 0 },
+    robots:  { wizards: 0, robots: 0 },
+  };
   /** Which faction the human player is controlling (null for headless AI-vs-AI).
    *  Used to gate per-faction alerts — the player shouldn't get a notification every
    *  time the opposing AI finishes a research item, for instance. */
@@ -491,6 +519,13 @@ export class GameEngine {
     if (unit.stats.damage <= 0) return;
     const targetEntity = this.entities.get(targetId);
     if (!targetEntity) return;
+    // Non-combat treaty blocks attack orders toward signatories (Phase 14).
+    if (this._nonCombatTreaties[unit.faction][targetEntity.faction]) {
+      if (this._isPlayerFaction(unit.faction)) {
+        this.onAlert?.(`Attack blocked — non-combat treaty with ${targetEntity.faction}`);
+      }
+      return;
+    }
     if (targetEntity.kind === "unit") {
       const t = targetEntity as UnitEntity;
       if (t.isFlying && !unit.canAttackAir) return;
@@ -2224,6 +2259,12 @@ export class GameEngine {
         dmg = Math.round(dmg * unit.damageBonusMultiplier);
       target.stats.hp -= dmg;
 
+      // Phase 14 alignment: every hit moves the VICTIM's faction alignment
+      // toward the attacker downward. Combat grudges stack over the match.
+      if (target.faction !== unit.faction && dmg > 0) {
+        this._adjustAlignment(target.faction, unit.faction, -diplomacyConfig.alignmentOnAttackDmgMult * dmg);
+      }
+
       this._attackEvents.push({
         attackerId: unit.id,
         targetId: target.id,
@@ -2447,6 +2488,170 @@ export class GameEngine {
    *  real-time scheduler so tests can assert deterministic post-tick state. */
   stepTick(tickNumber = 0, elapsedMs = 0): void {
     this.tick(tickNumber, elapsedMs);
+  }
+
+  // ── Diplomacy (Phase 14) ────────────────────────────────────────────────────
+
+  /** Current alignment A → B (−100 .. +100). Primarily for tests / AI. */
+  getAlignment(from: Faction, toward: Faction): number {
+    return this._alignment[from][toward];
+  }
+
+  /** Test / dev hook: seed alignment directly. Used by tests to simulate a
+   *  friendly opening state that would normally take several accepted proposals. */
+  setAlignment(from: Faction, toward: Faction, value: number): void {
+    this._alignment[from][toward] = this._clampAlignment(value);
+  }
+
+  /** All active proposals. UI filters by `to === activeFaction` for the
+   *  incoming-request list. */
+  getPendingProposals(): readonly DiplomaticProposal[] {
+    return this._pendingProposals;
+  }
+
+  /** True while a non-combat treaty is active between two factions. */
+  hasNonCombatTreaty(a: Faction, b: Faction): boolean {
+    return this._nonCombatTreaties[a][b];
+  }
+
+  /**
+   * Push a new diplomatic proposal into the pending queue. Rejects silently
+   * when:
+   *   - the same sender→target already has a pending proposal of the same kind
+   *     (avoids spam);
+   *   - resource request payload is missing or the amount is non-positive;
+   *   - unit request target doesn't exist or doesn't belong to `to`.
+   *
+   * Accepting is handled separately by `issueRespondToProposal` — the AI
+   * responds via `MilitaryAI._respondToProposals`, and human players respond
+   * through the UI.
+   */
+  issueProposeDiplomaticAction(
+    sender: Faction,
+    target: Faction,
+    kind: DiplomaticProposalKind,
+    payload?: { resource?: { kind: "wood" | "water" | "mana"; amount: number }; unitId?: string },
+  ): void {
+    if (sender === target) return;
+    if (this._pendingProposals.some((p) => p.from === sender && p.to === target && p.kind === kind)) {
+      return;
+    }
+    if (kind === "resourceRequest") {
+      if (!payload?.resource || payload.resource.amount <= 0) return;
+    }
+    if (kind === "unitRequest") {
+      if (!payload?.unitId) return;
+      const u = this.entities.get(payload.unitId);
+      if (!u || u.kind !== "unit" || u.faction !== target) return;
+    }
+    const proposal: DiplomaticProposal = {
+      id: `prop_${this._proposalIdCounter++}`,
+      kind,
+      from: sender,
+      to: target,
+      createdTick: 0,
+      ...(payload?.resource ? { resource: payload.resource } : {}),
+      ...(payload?.unitId ? { unitId: payload.unitId } : {}),
+    };
+    this._pendingProposals.push(proposal);
+  }
+
+  /** Resolve a pending proposal. On accept, applies the effect + bumps
+   *  alignment both sides; on decline, bumps alignment down both sides. */
+  issueRespondToProposal(proposalId: string, accept: boolean): void {
+    const idx = this._pendingProposals.findIndex((p) => p.id === proposalId);
+    if (idx === -1) return;
+    const p = this._pendingProposals[idx]!;
+    this._pendingProposals.splice(idx, 1);
+
+    if (!accept) {
+      this._adjustAlignment(p.from, p.to, diplomacyConfig.alignmentOnDecline);
+      this._adjustAlignment(p.to, p.from, diplomacyConfig.alignmentOnDecline);
+      if (this._isPlayerFaction(p.from)) {
+        this.onAlert?.(uiText.diplomacy.alertProposalDeclined(p.to, p.kind));
+      }
+      return;
+    }
+
+    switch (p.kind) {
+      case "openBorders":
+        this._openBorders[p.from][p.to] = true;
+        this._openBorders[p.to][p.from] = true;
+        this._adjustAlignment(p.from, p.to, diplomacyConfig.alignmentOnOpenBordersAccept);
+        this._adjustAlignment(p.to, p.from, diplomacyConfig.alignmentOnOpenBordersAccept);
+        if (this._isPlayerFaction(p.from) || this._isPlayerFaction(p.to)) {
+          this.onAlert?.(uiText.diplomacy.alertOpenBorders(p.from === this.playerFaction ? p.to : p.from));
+        }
+        break;
+      case "nonCombat":
+        this._nonCombatTreaties[p.from][p.to] = true;
+        this._nonCombatTreaties[p.to][p.from] = true;
+        this._adjustAlignment(p.from, p.to, diplomacyConfig.alignmentOnNonCombatAccept);
+        this._adjustAlignment(p.to, p.from, diplomacyConfig.alignmentOnNonCombatAccept);
+        if (this._isPlayerFaction(p.from) || this._isPlayerFaction(p.to)) {
+          this.onAlert?.(uiText.diplomacy.alertNonCombat(p.from === this.playerFaction ? p.to : p.from));
+        }
+        break;
+      case "resourceRequest": {
+        const r = p.resource;
+        if (!r) return;
+        const donor = this.resources[p.to];
+        if (donor[r.kind] < r.amount) return; // silently drop if donor can't pay
+        donor[r.kind] -= r.amount;
+        this.resources[p.from][r.kind] += r.amount;
+        this._adjustAlignment(p.from, p.to, diplomacyConfig.alignmentOnResourceAccept);
+        this._adjustAlignment(p.to, p.from, diplomacyConfig.alignmentOnResourceAccept);
+        if (this._isPlayerFaction(p.from)) {
+          this.onAlert?.(uiText.diplomacy.alertResourceTransfer(p.to, r.amount, r.kind));
+        }
+        break;
+      }
+      case "unitRequest": {
+        if (!p.unitId) return;
+        const ent = this.entities.get(p.unitId);
+        if (!ent || ent.kind !== "unit" || ent.faction !== p.to) return;
+        ent.faction = p.from;
+        this._adjustAlignment(p.from, p.to, diplomacyConfig.alignmentOnUnitRequestAccept);
+        this._adjustAlignment(p.to, p.from, diplomacyConfig.alignmentOnUnitRequestAccept);
+        if (this._isPlayerFaction(p.from)) {
+          const u = ent as UnitEntity;
+          this.onAlert?.(uiText.diplomacy.alertUnitTransfer(p.to, u.name ?? u.typeKey));
+        }
+        break;
+      }
+    }
+
+    if (this._isPlayerFaction(p.from)) {
+      // Already covered by the kind-specific alert above; no double-fire.
+    }
+  }
+
+  private _clampAlignment(v: number): number {
+    return Math.max(diplomacyConfig.alignmentMin, Math.min(diplomacyConfig.alignmentMax, v));
+  }
+
+  private _adjustAlignment(from: Faction, toward: Faction, delta: number): void {
+    this._alignment[from][toward] = this._clampAlignment(this._alignment[from][toward] + delta);
+  }
+
+  /** Fire a one-shot alert when alignment crosses ±`alertThreshold` in either
+   *  direction. Compares against `_prevAlignment` from the previous tick snapshot. */
+  private _checkAlignmentTransitions(): void {
+    if (this.playerFaction === null) return;
+    const me = this.playerFaction;
+    for (const other of FACTIONS) {
+      if (other === me) continue;
+      const prev = this._prevAlignment[other][me];
+      const curr = this._alignment[other][me];
+      const th = diplomacyConfig.alertThreshold;
+      if (prev < th && curr >= th) {
+        this.onAlert?.(uiText.diplomacy.alertAlignmentHigh(other));
+      } else if (prev > -th && curr <= -th) {
+        this.onAlert?.(uiText.diplomacy.alertAlignmentLow(other));
+      }
+    }
+    // Cache for next tick's diff.
+    for (const a of FACTIONS) for (const b of FACTIONS) this._prevAlignment[a][b] = this._alignment[a][b];
   }
 
   issueManaShieldToggle(unitId: string): void {
@@ -2832,12 +3037,13 @@ export class GameEngine {
   }
 
   private _computeFactionStats(): Record<Faction, FactionStats> {
-    const mk = (): FactionStats => ({
+    const mk = (f: Faction): FactionStats => ({
       militaryStrength: 0, culture: 0, defense: 0, intelligence: 0, footprint: 0,
-      alignment: { wizards: 0, robots: 0 },
-      openBorders: { wizards: false, robots: false },
+      alignment: { ...this._alignment[f] },
+      openBorders: { ...this._openBorders[f] },
+      nonCombatTreaties: { ...this._nonCombatTreaties[f] },
     });
-    const result: Record<Faction, FactionStats> = { wizards: mk(), robots: mk() };
+    const result: Record<Faction, FactionStats> = { wizards: mk("wizards"), robots: mk("robots") };
     for (const unit of this.entities.units()) {
       if (unit.state.kind === "platformShell") continue;
       const role = unitRoles[unit.typeKey];
@@ -2898,6 +3104,7 @@ export class GameEngine {
     this._processTempControlExpiry();
     this._processAmphitheatreXp(tick);
     this._processClericHealing(tick);
+    this._checkAlignmentTransitions();
     this._updateFog(tick);
     this.events.flushDeferred();
 
@@ -2928,6 +3135,7 @@ export class GameEngine {
       spells: this._spellEvents.splice(0),
       factionStats: this._computeFactionStats(),
       detectedIds: this._computeDetectedIds(),
+      diplomacy: { pendingProposals: [...this._pendingProposals] },
     });
   }
 
@@ -3052,7 +3260,12 @@ export class GameEngine {
    * Own-faction targets (e.g. healing) pass through; buildings aren't hideable.
    */
   private _isTargetableBy(target: Entity, attackerFaction: Faction): boolean {
-    if (target.kind !== "unit") return true;
+    if (target.kind !== "unit") {
+      // Buildings follow the same non-combat-treaty rule as units — an allied
+      // building can't be auto-aggroed or the mid-chase attack will keep landing.
+      if (this._nonCombatTreaties[attackerFaction][target.faction]) return false;
+      return true;
+    }
     const u = target as UnitEntity;
     if (u.state.kind === "hidingInBuilding" || u.state.kind === "inEnemyBuilding") return false;
     // Puppeted leaders under Illusionist temp-control are "invisible" to both sides'
@@ -3062,6 +3275,8 @@ export class GameEngine {
     // puppet off once it's lured away.
     if (u.tempControlTicks > 0) return false;
     if (u.faction === attackerFaction) return true;
+    // Non-combat treaty — bilateral attack ban. Auto-aggro skips allied units.
+    if (this._nonCombatTreaties[attackerFaction][u.faction]) return false;
     if (u.invisibilityActive || u.disguiseActive || u.concealed) {
       return this._detectedIdsThisTick[attackerFaction].has(u.id);
     }
@@ -3114,7 +3329,14 @@ export class GameEngine {
   private _updateFog(tick: number): void {
     for (const faction of FACTIONS) {
       const fog = this.fog[faction];
+      // Own vision, plus any open-border ally's vision (Phase 14).
       const sources = this._collectVisionSources(faction);
+      for (const other of FACTIONS) {
+        if (other === faction) continue;
+        if (this._openBorders[faction][other]) {
+          sources.push(...this._collectVisionSources(other));
+        }
+      }
       fog.update(sources);
       this._updateLastSeen(faction, fog, tick);
     }

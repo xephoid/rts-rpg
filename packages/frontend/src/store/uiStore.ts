@@ -150,6 +150,23 @@ export type UIStore = {
   issueInfiltrateAttack: (platformId: string, occupantId: string) => void;
   clearPendingInfiltrateAttack: () => void;
 
+  /** Diplomacy (Phase 14): outgoing proposal waiting to reach the engine. Single
+   *  slot is fine — proposals are discrete and the UI sends them one at a time. */
+  pendingDiplomaticProposal: {
+    sender: Faction;
+    target: Faction;
+    kind: "openBorders" | "nonCombat" | "resourceRequest" | "unitRequest";
+    resource?: { kind: "wood" | "water" | "mana"; amount: number };
+    unitId?: string;
+  } | null;
+  issueDiplomaticProposal: (p: NonNullable<UIStore["pendingDiplomaticProposal"]>) => void;
+  clearPendingDiplomaticProposal: () => void;
+
+  /** Diplomacy (Phase 14): response to an incoming proposal. */
+  pendingDiplomaticResponse: { proposalId: string; accept: boolean } | null;
+  issueDiplomaticResponse: (proposalId: string, accept: boolean) => void;
+  clearPendingDiplomaticResponse: () => void;
+
   /** Active spell targeting mode — set when a spell button is clicked. Cleared on cast or Escape. */
   pendingSpell: { kind: "iceBlast" | "fieryExplosion" | "enlarge" | "reduce"; casterId: string } | null;
   setPendingSpell: (spell: UIStore["pendingSpell"]) => void;
@@ -292,6 +309,15 @@ export const useUIStore = create<UIStore>((set) => ({
   issueInfiltrateAttack: (platformId, occupantId) =>
     set({ pendingInfiltrateAttack: { platformId, occupantId } }),
   clearPendingInfiltrateAttack: () => set({ pendingInfiltrateAttack: null }),
+
+  pendingDiplomaticProposal: null,
+  issueDiplomaticProposal: (p) => set({ pendingDiplomaticProposal: p }),
+  clearPendingDiplomaticProposal: () => set({ pendingDiplomaticProposal: null }),
+
+  pendingDiplomaticResponse: null,
+  issueDiplomaticResponse: (proposalId, accept) =>
+    set({ pendingDiplomaticResponse: { proposalId, accept } }),
+  clearPendingDiplomaticResponse: () => set({ pendingDiplomaticResponse: null }),
 
   pendingSpell: null,
   setPendingSpell: (spell) => set({ pendingSpell: spell }),

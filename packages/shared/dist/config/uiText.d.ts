@@ -41,5 +41,29 @@ export declare const uiText: {
         readonly alertTempControlExpired: (unitName: string) => string;
         readonly alertDetected: (unitName: string) => string;
     };
+    readonly diplomacy: {
+        readonly panelHeader: "Diplomacy";
+        readonly alignmentLabel: "Alignment";
+        readonly activeAgreements: "Active Agreements";
+        readonly openBordersLabel: "Open Borders";
+        readonly nonCombatTreatyLabel: "Non-Combat Treaty";
+        readonly incomingProposals: "Incoming Proposals";
+        readonly outgoingActions: "Propose to";
+        readonly proposeOpenBorders: "Propose Open Borders";
+        readonly proposeNonCombat: "Propose Non-Combat Treaty";
+        readonly proposeResourceRequest: "Request Resources";
+        readonly proposeUnitRequest: "Request Unit";
+        readonly accept: "Accept";
+        readonly decline: "Decline";
+        readonly alertProposalReceived: (from: string, kind: string) => string;
+        readonly alertProposalAccepted: (other: string, kind: string) => string;
+        readonly alertProposalDeclined: (other: string, kind: string) => string;
+        readonly alertOpenBorders: (other: string) => string;
+        readonly alertNonCombat: (other: string) => string;
+        readonly alertResourceTransfer: (other: string, amt: number, kind: string) => string;
+        readonly alertUnitTransfer: (other: string, unitName: string) => string;
+        readonly alertAlignmentHigh: (other: string) => string;
+        readonly alertAlignmentLow: (other: string) => string;
+    };
 };
 //# sourceMappingURL=uiText.d.ts.map

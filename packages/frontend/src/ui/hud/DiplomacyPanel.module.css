@@ -1,0 +1,147 @@
+.panel {
+  position: absolute;
+  top: 280px;
+  right: 8px;
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-panel-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  pointer-events: auto;
+  z-index: 20;
+  min-width: 240px;
+  max-width: 280px;
+}
+
+.header {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.section {
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.sectionTitle {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.alignmentRow {
+  display: grid;
+  grid-template-columns: 72px 1fr 36px;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #9ca3af;
+  padding: 2px 0;
+}
+
+.alignmentTrack {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.alignmentFill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.alignmentFillPositive {
+  background: #22c55e;
+  left: 50%;
+}
+
+.alignmentFillNegative {
+  background: #ef4444;
+  right: 50%;
+}
+
+.alignmentValue {
+  font-size: 10px;
+  color: #d1d5db;
+  text-align: right;
+  font-weight: 600;
+}
+
+.agreementTag {
+  display: inline-block;
+  padding: 2px 6px;
+  margin: 2px 4px 2px 0;
+  font-size: 10px;
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #86efac;
+  border-radius: 3px;
+}
+
+.proposalCard {
+  padding: 4px 6px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+.proposalLabel {
+  font-size: 11px;
+  color: #d1d5db;
+  margin-bottom: 4px;
+}
+
+.proposalButtons {
+  display: flex;
+  gap: 4px;
+}
+
+.acceptBtn,
+.declineBtn,
+.proposeBtn {
+  flex: 1;
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  color: #d1d5db;
+}
+
+.acceptBtn:hover,
+.declineBtn:hover,
+.proposeBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.acceptBtn {
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #86efac;
+}
+
+.declineBtn {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.proposeBtn {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  text-align: left;
+}
+
+.empty {
+  font-size: 10px;
+  color: #4b5563;
+  font-style: italic;
+}

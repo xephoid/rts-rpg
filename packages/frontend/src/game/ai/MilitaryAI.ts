@@ -30,8 +30,10 @@ import {
   resourceDropoffBuildings,
   HIDING_CAPABLE_BUILDINGS,
   hidingBuildingConfig,
+  diplomacy as diplomacyConfig,
   TICKS_PER_SEC,
 } from "@neither/shared";
+import type { DiplomaticProposal } from "@neither/shared";
 import type { Entity } from "../entities/Entity.js";
 import type { UnitEntity } from "../entities/UnitEntity.js";
 import type { BuildingEntity } from "../entities/BuildingEntity.js";
@@ -58,6 +60,10 @@ export interface AIEngineInterface {
   issueEnterPlatformOrder(coreId: string, platformId: string): void;
   issueHideOrder(unitId: string, buildingId: string): void;
   issueResearchOrder(buildingId: string, researchKey: string): void;
+  issueRespondToProposal(proposalId: string, accept: boolean): void;
+  getAlignment(from: Faction, toward: Faction): number;
+  getPendingProposals(): readonly DiplomaticProposal[];
+  hasNonCombatTreaty(a: Faction, b: Faction): boolean;
 }
 
 // ── Faction roles ───────────────────────────────────────────────────────────
@@ -342,6 +348,11 @@ export class MilitaryAI {
     // the leader contributes population + charisma either way, no real downside.
     this._hideLeader(engine, ctx);
 
+    // Diplomacy (Phase 14): auto-respond to any pending proposals addressed
+    // at this AI faction. Military archetype is conservative — accepts only
+    // when alignment toward the sender has climbed above the configured gate.
+    this._respondToProposals(engine);
+
     if (!this.hasScouted && tick >= SCOUT_DELAY_TICKS) {
       this._scout(engine, ctx);
     }
@@ -380,6 +391,9 @@ export class MilitaryAI {
       // A temp-controlled leader still reads as a friendly to its original faction.
       // Skip here too — threat/defence logic would otherwise swarm the AI's own puppet.
       if (u.tempControlTicks > 0) continue;
+      // Non-combat treaty partner — engine rejects attack orders against them
+      // anyway; filtering at threat-detection avoids wasted AI cycles.
+      if (engine.hasNonCombatTreaty(this.faction, u.faction)) continue;
       if (_distSq(u.position, homeCenter) < THREAT_RADIUS * THREAT_RADIUS) threats.push(u);
     }
 
@@ -1042,6 +1056,23 @@ export class MilitaryAI {
   /** Send the named leader into a friendly hiding-capable building whenever it's
    *  outside and idle. Ignores leaders that are already on the move, mid-action, or
    *  already hidden. If no building has capacity the leader just stays put. */
+  /** Process any pending diplomatic proposals addressed at this AI faction.
+   *  Military archetype accepts only when alignment toward the sender clears
+   *  `diplomacy.aiAcceptThreshold` — a conservative gate that forces the
+   *  proposer to invest in good-faith actions first (accepted smaller
+   *  requests, avoiding attacks). Declined proposals are resolved the same
+   *  tick so the pending queue doesn't grow unbounded. */
+  private _respondToProposals(engine: AIEngineInterface): void {
+    const pending = engine.getPendingProposals();
+    for (const p of pending) {
+      if (p.to !== this.faction) continue;
+      const align = engine.getAlignment(this.faction, p.from);
+      const accept = align >= diplomacyConfig.aiAcceptThreshold;
+      engine.issueRespondToProposal(p.id, accept);
+      this._log(`proposal ${p.kind} from ${p.from} → ${accept ? "ACCEPT" : "DECLINE"} (align=${align.toFixed(0)})`);
+    }
+  }
+
   private _hideLeader(engine: AIEngineInterface, ctx: Ctx): void {
     const leaderTypeKey = namedLeaders[this.faction].typeKey;
     const leader = ctx.units.find((u) => u.typeKey === leaderTypeKey);
@@ -1397,6 +1428,7 @@ function _issueAttackWave(
   cx /= attackers.length; cy /= attackers.length;
   const centroid: Vec2 = { x: cx, y: cy };
 
+  const attackerFaction = attackers[0]!.faction;
   const enemyUnits = (enemies.filter((e) => e.kind === "unit") as UnitEntity[])
     .filter((e) =>
       e.state.kind !== "platformShell" &&
@@ -1410,7 +1442,9 @@ function _issueAttackWave(
       e.state.kind !== "inEnemyBuilding" &&
       // Temp-controlled leaders read as friendly to the puppeteer; the rest of the
       // AI shouldn't waste a wave on them either.
-      e.tempControlTicks <= 0,
+      e.tempControlTicks <= 0 &&
+      // Non-combat treaty partner is off-limits.
+      !engine.hasNonCombatTreaty(attackerFaction, e.faction),
     );
   const leaders = enemyUnits.filter((u) => LEADER_TYPES.has(u.typeKey));
   const nonLeaders = enemyUnits
@@ -1423,6 +1457,8 @@ function _issueAttackWave(
     let bd = Infinity;
     for (const e of enemies) {
       if (e.kind !== "building") continue;
+      // Skip treaty-partner buildings too — `issueAttackOrder` would reject anyway.
+      if (engine.hasNonCombatTreaty(attackerFaction, e.faction)) continue;
       const d = _distSq(e.position, centroid);
       if (d < bd) { bd = d; bldg = e; }
     }

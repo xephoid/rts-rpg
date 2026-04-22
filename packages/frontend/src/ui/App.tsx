@@ -6,6 +6,7 @@ import { useUIStore } from "../store/uiStore.js";
 import { AlertLog } from "./hud/AlertLog.js";
 import { BottomPanel } from "./hud/BottomPanel.js";
 import { FactionStatsPanel } from "./hud/FactionStatsPanel.js";
+import { DiplomacyPanel } from "./hud/DiplomacyPanel.js";
 import { ResourceBar } from "./hud/ResourceBar.js";
 import { StartScreen } from "./screens/StartScreen.js";
 import styles from "./App.module.css";
@@ -65,6 +66,10 @@ export function App() {
   const clearPendingInfiltrate = useUIStore((s) => s.clearPendingInfiltrate);
   const pendingInfiltrateAttack = useUIStore((s) => s.pendingInfiltrateAttack);
   const clearPendingInfiltrateAttack = useUIStore((s) => s.clearPendingInfiltrateAttack);
+  const pendingDiplomaticProposal = useUIStore((s) => s.pendingDiplomaticProposal);
+  const clearPendingDiplomaticProposal = useUIStore((s) => s.clearPendingDiplomaticProposal);
+  const pendingDiplomaticResponse = useUIStore((s) => s.pendingDiplomaticResponse);
+  const clearPendingDiplomaticResponse = useUIStore((s) => s.clearPendingDiplomaticResponse);
   const pendingSpell = useUIStore((s) => s.pendingSpell);
   const pendingIceBlast = useUIStore((s) => s.pendingIceBlast);
   const clearPendingIceBlast = useUIStore((s) => s.clearPendingIceBlast);
@@ -383,6 +388,23 @@ export function App() {
     clearPendingInfiltrateAttack();
   }, [pendingInfiltrateAttack, clearPendingInfiltrateAttack]);
 
+  // Diplomacy bridges (Phase 14)
+  useEffect(() => {
+    if (!pendingDiplomaticProposal) return;
+    const p = pendingDiplomaticProposal;
+    engineRef.current?.issueProposeDiplomaticAction(p.sender, p.target, p.kind, {
+      ...(p.resource ? { resource: p.resource } : {}),
+      ...(p.unitId ? { unitId: p.unitId } : {}),
+    });
+    clearPendingDiplomaticProposal();
+  }, [pendingDiplomaticProposal, clearPendingDiplomaticProposal]);
+
+  useEffect(() => {
+    if (!pendingDiplomaticResponse) return;
+    engineRef.current?.issueRespondToProposal(pendingDiplomaticResponse.proposalId, pendingDiplomaticResponse.accept);
+    clearPendingDiplomaticResponse();
+  }, [pendingDiplomaticResponse, clearPendingDiplomaticResponse]);
+
   // Sync spell targeting mode to renderer
   useEffect(() => {
     rendererRef.current?.setSpellMode(pendingSpell);
@@ -474,6 +496,7 @@ export function App() {
       <div className={styles.hud}>
         <ResourceBar />
         {statsOpen && <FactionStatsPanel />}
+        {statsOpen && <DiplomacyPanel />}
         <AlertLog />
         <BottomPanel />
       </div>

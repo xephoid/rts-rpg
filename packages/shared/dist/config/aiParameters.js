@@ -16,4 +16,32 @@ export const npcStartingAlignment = {
     seaMerchants: { towardWizards: 20, towardRobots: 20 },
     ancientGuardians: { towardWizards: -20, towardRobots: -20 },
 };
+/**
+ * Phase 14 diplomacy tunables. Alignment is a −100 .. +100 float the AI consults
+ * when deciding whether to accept incoming proposals; attacks push it down,
+ * accepted proposals push it up. All values tagged "Initial guess" per CLAUDE.md —
+ * adjust after playtest.
+ */
+export const diplomacy = {
+    // Clamp bounds (display range for alignment bars + AI threshold math).
+    alignmentMin: -100,
+    alignmentMax: 100,
+    // Combat impact: a faction that loses 100 HP worth of units to another faction
+    // shifts -2 alignment toward them at 0.02 per damage dealt.
+    alignmentOnAttackDmgMult: 0.02,
+    // Accepted proposals both increase alignment — the spec notes this as a trust
+    // feedback loop. Declines hit both sides' alignment because the receiver
+    // rejected an overture and the sender sees the rejection.
+    alignmentOnOpenBordersAccept: 10,
+    alignmentOnNonCombatAccept: 10,
+    alignmentOnResourceAccept: 5,
+    alignmentOnUnitRequestAccept: 15,
+    alignmentOnDecline: -5,
+    // AI Military archetype: accept when alignment toward sender is at least this
+    // high. Lower = more agreeable; +40 is intentionally conservative so the
+    // player has to invest diplomatic capital before treaties go through.
+    aiAcceptThreshold: 40,
+    // Owner-facing alert fires on crossing ±threshold in either direction.
+    alertThreshold: 40,
+};
 //# sourceMappingURL=aiParameters.js.map

@@ -9,9 +9,9 @@ export const gatherRates = {
     waterPerTick: 2,
 };
 /** Ticks between each harvest action. Higher = slower gathering. 4 = 1/4 of single-tick speed. */
-export const GATHER_INTERVAL_TICKS = 4;
+export const GATHER_INTERVAL_TICKS = 20;
 /** XP awarded to a gatherer on each successful resource delivery. Initial guess. */
-export const gatherXpPerTrip = 5;
+export const gatherXpPerTrip = 2;
 // ── Robot unit costs ──────────────────────────────────────────────────────────
 export const robotUnitCosts = {
     // Initial guess: light units ~20-40w + 10-20w, 15-20s; heavy ~60-80w + 30-40w, 30-45s

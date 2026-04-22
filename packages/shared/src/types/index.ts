@@ -147,8 +147,33 @@ export type FactionStats = {
   defense: number;
   intelligence: number;
   footprint: number;
+  /** −100 .. +100 per opposing faction. Higher = friendlier. AI uses this to decide
+   *  whether to accept treaty proposals. */
   alignment: Record<Faction, number>;
+  /** Bilateral — both directions flip together when a proposal is accepted. */
   openBorders: Record<Faction, boolean>;
+  /** Bilateral — blocks attack orders between signatories. */
+  nonCombatTreaties: Record<Faction, boolean>;
+};
+
+/** Diplomatic proposal in flight between two factions. Accepted = applied +
+ *  removed from pending. Declined = removed + alignment hit both sides. */
+export type DiplomaticProposalKind =
+  | "openBorders"
+  | "nonCombat"
+  | "resourceRequest"
+  | "unitRequest";
+
+export type DiplomaticProposal = {
+  id: string;
+  kind: DiplomaticProposalKind;
+  from: Faction;
+  to: Faction;
+  /** Only set for `resourceRequest`. */
+  resource?: { kind: "wood" | "water" | "mana"; amount: number };
+  /** Only set for `unitRequest` — id of the unit the sender wants transferred. */
+  unitId?: string;
+  createdTick: number;
 };
 
 export type GameStateSnapshot = {
@@ -176,4 +201,9 @@ export type GameStateSnapshot = {
    * when presenting enemy units to the viewer.
    */
   detectedIds: Record<Faction, string[]>;
+  /** Phase 14 diplomacy state the UI reads. Active agreements are in
+   *  `factionStats[*].openBorders` / `nonCombatTreaties`. */
+  diplomacy: {
+    pendingProposals: DiplomaticProposal[];
+  };
 };
