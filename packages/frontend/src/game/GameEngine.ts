@@ -52,6 +52,8 @@ import {
   ROBOT_PLATFORM_TYPES,
   CONVERT_CASTER_TYPES,
   convertConfig,
+  technologicalVictory,
+  victoryAlert,
   uiText,
   diplomacy as diplomacyConfig,
 } from "@neither/shared";
@@ -183,6 +185,25 @@ export class GameEngine {
     FACTIONS.map((f) => [f, new Set<string>()]),
   );
 
+  /**
+   * Phase 15 tech-victory tracker. Permanent record of every typeKey each
+   * faction has produced / built / researched / converted at least once.
+   * Drives progress bars + victory detection. Writes are additive only:
+   * losing a unit or a building doesn't un-check the item. Seeded in the
+   * constructor with each active faction's starting entities so a
+   * just-spawned castle / home / leader / gatherer counts immediately.
+   */
+  private readonly _unlockedItems: Record<Faction, Set<string>> =
+    fullFactionRecord(() => new Set<string>());
+
+  /** One-shot guard for the 75% proximity alert per faction per condition. */
+  private readonly _techAlertFired: Record<Faction, boolean> =
+    fullFactionRecord(() => false);
+
+  /** True once a tech victory has been declared — prevents double-firing the
+   *  VictoryAlert event or re-entering the winner declaration path. */
+  private _techVictoryDeclared = false;
+
   /** One MilitaryAI per non-human active faction. Empty in headless mode (no
    *  `playerFaction`). Each tick every AI runs independently. */
   private readonly _ais: MilitaryAI[];
@@ -271,6 +292,13 @@ export class GameEngine {
     this.lastSeen = fullFactionRecord(() => new LastSeenMap());
 
     this._spawnStartingEntities();
+    // Seed the tech-victory tracker with every faction's starting entities
+    // so the just-spawned castle / home / leader / initial gatherers count
+    // immediately (otherwise the progress bar starts at 0% despite visible
+    // units on the map).
+    for (const entity of this.entities.all()) {
+      this._unlockedItems[entity.faction].add(entity.typeKey);
+    }
     this.loop = new GameLoop(this.tick.bind(this));
 
     // One MilitaryAI per non-human active faction. Headless runs (no player)
@@ -1243,6 +1271,8 @@ export class GameEngine {
       if (building.state.kind !== "underConstruction") { unit.state = { kind: "idle" }; continue; }
       const done = building.advanceConstruction();
       if (done) {
+        // Tech-victory unlock on first completion of this building typeKey.
+        this._unlockedItems[building.faction].add(building.typeKey);
         if (SINGLE_USE_BUILDERS.has(unit.typeKey)) {
           // Eject any attached Core before removing the platform
           if (unit.attachedCoreId) this.issueDetachOrder(unit.id);
@@ -2314,6 +2344,9 @@ export class GameEngine {
       unit.materialType = metalUnlocked ? "metal" : "wood";
     }
     this.entities.add(unit);
+    // Permanent tech-victory checkmark — first time this faction produces
+    // this unit typeKey. Set add() is a no-op on repeats.
+    this._unlockedItems[building.faction].add(unitTypeKey);
   }
 
   private _findSpawnTile(building: BuildingEntity, isFlying = false): Vec2 | null {
@@ -2352,6 +2385,9 @@ export class GameEngine {
       const done = building.advanceResearch();
       if (done) {
         this._completedResearch.get(faction)?.add(researchKey);
+        // Mirror into tech-victory tracker — research items are one
+        // category of unlockable the checklist counts.
+        this._unlockedItems[faction].add(researchKey);
         // Only notify the player about their OWN research completing. The opposing
         // AI's upgrades aren't the player's concern at the alert layer.
         if (this._isPlayerFaction(faction)) {
@@ -2521,6 +2557,10 @@ export class GameEngine {
         const originalFaction = target.faction;
         target.originalFaction = originalFaction;
         target.faction = caster.faction;
+        // Tech-victory cross-species unlock — the caster's faction now has
+        // "produced" this typeKey for checklist purposes, even if the
+        // converted unit later dies. Spec §7 line 308.
+        this._unlockedItems[caster.faction].add(target.typeKey);
         this.giveXp(caster.id, xpRates.convertEnemy);
         // Alert both sides — loser sees their unit defected, winner sees the pickup.
         if (this._isPlayerFaction(originalFaction)) {
@@ -2959,6 +2999,40 @@ export class GameEngine {
    *  Clamped to the config's min/max. Unilateral — call twice for bilateral. */
   bumpAlignment(from: Faction, toward: Faction, delta: number): void {
     this._adjustAlignment(from, toward, delta);
+  }
+
+  /**
+   * Phase 15 tech-victory detection. Compares each active faction's unlocked
+   * items against `technologicalVictory.requiredItems` and fires:
+   *  - A one-shot proximity alert per faction at
+   *    `victoryAlert.proximityThresholdPct` progress (default 75%).
+   *  - A `VictoryAlert` event with `condition: "technological"` at 100%,
+   *    and pauses the game loop so the UI can render a victory screen.
+   * First winner wins — further ticks skip the winner-check path.
+   */
+  private _checkTechVictory(): void {
+    if (this._techVictoryDeclared) return;
+    const required = technologicalVictory.requiredItems;
+    const alertPct = victoryAlert.proximityThresholdPct / 100;
+
+    for (const f of this.activeFactions) {
+      const unlocked = this._unlockedItems[f];
+      let hit = 0;
+      for (const item of required) if (unlocked.has(item)) hit++;
+      const pct = hit / required.length;
+
+      if (pct >= 1) {
+        this._techVictoryDeclared = true;
+        this.events.queue("VictoryAlert", { faction: f, condition: "technological", pct: 100 });
+        this.onAlert?.(`${uiText.factions[f]} achieved Technological Victory!`);
+        this.loop.pause();
+        return;
+      }
+      if (pct >= alertPct && !this._techAlertFired[f]) {
+        this._techAlertFired[f] = true;
+        this.onAlert?.(uiText.victory.alertNearing(uiText.factions[f], uiText.victory.technological));
+      }
+    }
   }
 
   /** Fire a one-shot alert when alignment crosses ±`alertThreshold` in either
@@ -3463,6 +3537,7 @@ export class GameEngine {
     this._processAmphitheatreXp(tick);
     this._processClericHealing(tick);
     this._checkAlignmentTransitions();
+    this._checkTechVictory();
     this._updateFog(tick);
     this._updateMetFactions();
     this.events.flushDeferred();
@@ -3488,11 +3563,13 @@ export class GameEngine {
     }
     const completedSnap = fullFactionRecord<string[]>(() => []);
     const detectedSnap = fullFactionRecord<string[]>(() => []);
+    const unlockedSnap = fullFactionRecord<string[]>(() => []);
     const detectedIdsMap = this._computeDetectedIds();
     for (const f of FACTIONS) {
       resourcesSnap[f] = { ...this.resources[f] };
       completedSnap[f] = [...(this._completedResearch.get(f) ?? [])];
       detectedSnap[f] = detectedIdsMap[f];
+      unlockedSnap[f] = [...this._unlockedItems[f]];
     }
 
     this.onTick({
@@ -3515,6 +3592,7 @@ export class GameEngine {
       },
       factionSpecies: { ...this.factionSpecies },
       activeFactions: [...this.activeFactions],
+      unlockedItems: unlockedSnap,
     });
   }
 

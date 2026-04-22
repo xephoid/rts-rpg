@@ -237,4 +237,9 @@ export type GameStateSnapshot = {
   /** The factions actually participating in this match (2, 4, or 6 depending on
    *  map size). Renderer + UI iterate this instead of every possible slot. */
   activeFactions: Faction[];
+  /** Phase 15 tech-victory tracker: every unit typeKey, building typeKey, and
+   *  research item each faction has produced / constructed / researched /
+   *  converted at least once. Used by the tech-progress UI and the engine's
+   *  victory detection. Entries are permanent — once added, never removed. */
+  unlockedItems: Record<Faction, string[]>;
 };

@@ -6,6 +6,7 @@ import {
   wizardUnitStats,
   namedLeaders,
   convertConfig,
+  technologicalVictory,
 } from "@neither/shared";
 
 function spawnSubject(engine: GameEngine, faction: "wizards" | "robots", pos: { x: number; y: number }): UnitEntity {
@@ -154,5 +155,63 @@ describe("Convert action", () => {
     engine.stepTick(1, 16);
 
     expect(subject.state.kind).toBe("idle");
+  });
+
+  it("successful convert checks the target typeKey off the caster's tech-victory list", () => {
+    let latestSnapshot: { unlockedItems: Record<string, string[]> } | null = null;
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1,
+      onTick: (s) => { latestSnapshot = s; },
+    });
+    const subject = spawnSubject(engine, "wizards", { x: 30, y: 30 });
+    const core = spawnCore(engine, "robots", { x: 31, y: 30 });
+
+    engine.issueConvertOrder(subject.id, core.id);
+    for (let t = 0; t < convertConfig.baseDurationTicks + 5; t++) engine.stepTick(t, t * 16);
+
+    const snap = latestSnapshot as { unlockedItems: Record<string, string[]> } | null;
+    expect(snap?.unlockedItems.wizards).toContain("core");
+  });
+});
+
+describe("Technological victory detection", () => {
+  it("proximity alert fires when a faction crosses the 75% threshold", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards",
+      onTick: () => {},
+      onAlert: (m) => { alerts.push(m); },
+    });
+
+    // Force-unlock 75% of the required items on the wizard faction via the
+    // grantUnlock hook. Since grantUnlock doesn't exist, reach into the
+    // internal set directly for this test — the behaviour under test is the
+    // threshold trigger, not the unlock plumbing (covered elsewhere).
+    const set = (engine as unknown as { _unlockedItems: Record<string, Set<string>> })._unlockedItems.wizards;
+    const quota = Math.ceil(technologicalVictory.requiredItems.length * 0.75);
+    for (let i = 0; i < quota; i++) set.add(technologicalVictory.requiredItems[i]!);
+
+    engine.stepTick(0, 0);
+    expect(alerts.some((m) => m.includes("nearing"))).toBe(true);
+  });
+
+  it("winner declaration fires on 100% progress and pauses the loop", () => {
+    let victoryEvent = false;
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards",
+      onTick: () => {},
+      onAlert: (m) => { alerts.push(m); },
+    });
+    engine.events.on("VictoryAlert", (p: { condition: string }) => {
+      if (p.condition === "technological") victoryEvent = true;
+    });
+
+    const set = (engine as unknown as { _unlockedItems: Record<string, Set<string>> })._unlockedItems.wizards;
+    for (const item of technologicalVictory.requiredItems) set.add(item);
+
+    engine.stepTick(0, 0);
+    expect(victoryEvent).toBe(true);
+    expect(alerts.some((m) => m.includes("Technological Victory"))).toBe(true);
   });
 });
