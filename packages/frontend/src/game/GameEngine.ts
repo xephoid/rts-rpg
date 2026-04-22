@@ -121,6 +121,18 @@ const DEADLOCK_THRESHOLD = 20;
 /** Ticks a gatherer/dropoff unit waits before retrying pathfinding when no route is found (~1.5s). */
 const GATHER_RETRY_DELAY_TICKS = 90;
 /**
+ * Padding added to every `spatialIndex.query` radius when the caller may
+ * care about targeting a building. Buildings are indexed only at their
+ * top-left tile, so a building whose footprint extends into range can miss
+ * the raw (Chebyshev) query — padding by the max footprint size - 1
+ * (castle/home: 4) ensures any candidate whose footprint touches the
+ * search radius shows up in the result. Callers still use the precise
+ * `_distanceToTarget` helper (which handles building AABB) to filter out
+ * over-queried candidates. Stays in lock-step with the largest
+ * `footprintTiles` in `wizardBuildingStats` / `robotBuildingStats`.
+ */
+const BUILDING_FOOTPRINT_PAD = 4;
+/**
  * Unit types allowed to issue gather orders. Leaders + basic civilian units only.
  * TODO(capabilities): make this data-driven once a unit capability system exists.
  */
@@ -1324,8 +1336,12 @@ export class GameEngine {
       const effectiveRange = unit.stats.attackRange + wizardTowerConfig.rangeBonus;
       let bestTarget: Entity | null = null;
       let bestDist = Infinity;
-      for (const e of this.entities.all()) {
-        if (e.faction === unit.faction) continue;
+      const searchRadius = effectiveRange + BUILDING_FOOTPRINT_PAD;
+      const candidateIds = this.spatialIndex.query(unit.position, searchRadius);
+      for (const id of candidateIds) {
+        if (id === unit.id) continue;
+        const e = this.entities.get(id);
+        if (!e || e.faction === unit.faction) continue;
         if (e.stats.hp <= 0) continue;
         if (e.kind === "unit") {
           const eu = e as UnitEntity;
@@ -1398,8 +1414,12 @@ export class GameEngine {
 
       let bestTarget: Entity | null = null;
       let bestDist = Infinity;
-      for (const e of this.entities.all()) {
-        if (e.faction === platform.faction) continue;
+      const searchRadius = attackRange + BUILDING_FOOTPRINT_PAD;
+      const candidateIds = this.spatialIndex.query(platform.position, searchRadius);
+      for (const id of candidateIds) {
+        if (id === platform.id) continue;
+        const e = this.entities.get(id);
+        if (!e || e.faction === platform.faction) continue;
         if (e.stats.hp <= 0) continue;
         if (e.kind === "unit") {
           const eu = e as UnitEntity;
@@ -2378,8 +2398,12 @@ export class GameEngine {
       if (unit.state.kind !== "idle") continue;
       if (unit.stats.damage <= 0) continue; // workers, civilians, healers — not combat
       if (ROBOT_PLATFORM_TYPES.has(unit.typeKey) && !unit.attachedCoreId) continue; // unattached platforms don't auto-aggro
-      for (const entity of this.entities.all()) {
-        if (entity.faction === unit.faction) continue;
+      const searchRadius = unit.stats.attackRange + BUILDING_FOOTPRINT_PAD;
+      const candidateIds = this.spatialIndex.query(unit.position, searchRadius);
+      for (const id of candidateIds) {
+        if (id === unit.id) continue;
+        const entity = this.entities.get(id);
+        if (!entity || entity.faction === unit.faction) continue;
         if (entity.stats.hp <= 0) continue;
         if (entity.kind === "unit") {
           const eu = entity as UnitEntity;
@@ -2883,9 +2907,17 @@ export class GameEngine {
 
     this.resources[caster.faction].mana -= spellCosts.fieryExplosionMana;
     this._spellEvents.push({ kind: "fieryExplosion", casterId, casterPos: { ...caster.position }, targetPos: { ...targetPos } });
-    const radiusSq = spellEffects.fieryExplosion.radiusTiles ** 2;
-    for (const entity of [...this.entities.all()]) {
-      if (entity.faction === caster.faction) continue;
+    const radius = spellEffects.fieryExplosion.radiusTiles;
+    const radiusSq = radius * radius;
+    // Pad the spatial query so a building whose footprint overlaps the blast
+    // radius but whose top-left center sits just outside is still included;
+    // precise AABB-vs-point distance would need a _distanceToTarget call,
+    // but spell damage is point-radius (checks entity center), so we keep the
+    // simple Euclidean post-filter and just widen the candidate pool.
+    const candidateIds = this.spatialIndex.query(targetPos, radius + BUILDING_FOOTPRINT_PAD);
+    for (const id of candidateIds) {
+      const entity = this.entities.get(id);
+      if (!entity || entity.faction === caster.faction) continue;
       const ex = entity.position.x - targetPos.x;
       const ey = entity.position.y - targetPos.y;
       if (ex * ex + ey * ey > radiusSq) continue;
@@ -3229,6 +3261,23 @@ export class GameEngine {
     }
   }
 
+  /**
+   * Clear and repopulate the spatial index with every live entity at its
+   * current tile. Called once per tick from `tick()` so downstream scans
+   * (auto-aggro, detector reveal, discovery, garrison/ICP fire, Fiery
+   * Explosion) can use `spatialIndex.queryCircle` instead of iterating
+   * every entity. Buildings are inserted at their top-left position (the
+   * footprint can extend up to `BUILDING_FOOTPRINT_PAD` tiles further —
+   * callers compensate by padding their query radius and post-filtering
+   * with precise distance).
+   */
+  private _rebuildSpatialIndex(): void {
+    this.spatialIndex.clear();
+    for (const entity of this.entities.all()) {
+      this.spatialIndex.insert(entity.id, entity.position);
+    }
+  }
+
   // ── Fog ───────────────────────────────────────────────────────────────────────
 
   private tick(tick: number, elapsedMs: number): void {
@@ -3241,6 +3290,13 @@ export class GameEngine {
     this._processGathering(tick);
     this._processProduction();
     this._processResearch();
+    // Refresh the spatial index so every scan this tick (detector reveal,
+    // combat, auto-aggro, garrison/ICP fire, met/discovery) can route through
+    // a spatial query instead of iterating every entity. Rebuild happens after
+    // production so newly-spawned units are included; happens before the first
+    // consumer (detector reveal) so the index reflects final post-movement
+    // positions for this tick.
+    this._rebuildSpatialIndex();
     // Detector reveal must be computed BEFORE any combat routines so invisible/
     // disguised/hidden targets are filtered consistently for attackers + AI.
     this._refreshDetectedIds();
@@ -3338,9 +3394,19 @@ export class GameEngine {
       const detectors = this.entities
         .unitsByFaction(viewer)
         .filter((u) => u.isDetector && active(u));
-      if (detectors.length > 0) {
-        const enemyFaction: Faction = viewer === "wizards" ? "robots" : "wizards";
-        for (const t of this.entities.unitsByFaction(enemyFaction)) {
+      // Invert the scan: per detector, spatial-query within sightRange for any
+      // concealed enemy. Previously did enemy × detector linear iteration,
+      // which also baked in a 2-faction assumption (`viewer === "wizards" ?
+      // "robots" : "wizards"`). The query-based path is N-faction-correct by
+      // construction — it picks up candidates from every non-own faction.
+      for (const d of detectors) {
+        const rSq = d.stats.sightRange * d.stats.sightRange;
+        const candidateIds = this.spatialIndex.query(d.position, d.stats.sightRange);
+        for (const id of candidateIds) {
+          if (set.has(id)) continue;
+          const e = this.entities.get(id);
+          if (!e || e.kind !== "unit" || e.faction === viewer) continue;
+          const t = e as UnitEntity;
           if (!active(t)) continue;
           const concealedLike =
             t.concealed ||
@@ -3349,25 +3415,21 @@ export class GameEngine {
             t.state.kind === "hidingInBuilding" ||
             t.state.kind === "inEnemyBuilding";
           if (!concealedLike) continue;
-          for (const d of detectors) {
-            const dx = t.position.x - d.position.x;
-            const dy = t.position.y - d.position.y;
-            const dSq = dx * dx + dy * dy;
-            if (dSq <= d.stats.sightRange * d.stats.sightRange) {
-              set.add(t.id);
-              // Dev diagnostic: log detector + target + distance so balance-tuning
-              // playtesters can verify the detection radius matches config. Fires
-              // only on the transition (matches the owner-alert below).
-              if (!this._previousDetectedIds[viewer].has(t.id)) {
-                // eslint-disable-next-line no-console
-                console.warn(
-                  `[detect] ${d.typeKey}(${d.id}) @ (${d.position.x.toFixed(1)},${d.position.y.toFixed(1)}) ` +
-                  `sightRange=${d.stats.sightRange} revealed ${t.typeKey}(${t.id}) ` +
-                  `@ (${t.position.x.toFixed(1)},${t.position.y.toFixed(1)}) — dist=${Math.sqrt(dSq).toFixed(2)}`,
-                );
-              }
-              break;
-            }
+          const dx = t.position.x - d.position.x;
+          const dy = t.position.y - d.position.y;
+          const dSq = dx * dx + dy * dy;
+          if (dSq > rSq) continue;
+          set.add(t.id);
+          // Dev diagnostic: log detector + target + distance so balance-tuning
+          // playtesters can verify the detection radius matches config. Fires
+          // only on the transition (matches the owner-alert below).
+          if (!this._previousDetectedIds[viewer].has(t.id)) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[detect] ${d.typeKey}(${d.id}) @ (${d.position.x.toFixed(1)},${d.position.y.toFixed(1)}) ` +
+              `sightRange=${d.stats.sightRange} revealed ${t.typeKey}(${t.id}) ` +
+              `@ (${t.position.x.toFixed(1)},${t.position.y.toFixed(1)}) — dist=${Math.sqrt(dSq).toFixed(2)}`,
+            );
           }
         }
       }
@@ -3530,12 +3592,6 @@ export class GameEngine {
    *  (scaled) sightRange. Passengers / garrisoned / shelled units don't see. */
   private _pairHasSightContact(scanner: Faction, target: Faction): boolean {
     const mult = diplomacyConfig.metDetectionRadiusMult;
-    const targets = [
-      ...this.entities.unitsByFaction(target),
-      ...this.entities.buildingsByFaction(target),
-    ];
-    if (targets.length === 0) return false;
-
     for (const scannerUnit of this.entities.unitsByFaction(scanner)) {
       const k = scannerUnit.state.kind;
       if (k === "platformShell" || k === "garrisoned" || k === "inPlatform") continue;
@@ -3543,9 +3599,12 @@ export class GameEngine {
       const rSq = range * range;
       const sx = scannerUnit.position.x + 0.5;
       const sy = scannerUnit.position.y + 0.5;
-      for (const t of targets) {
-        const tx = t.position.x + 0.5;
-        const ty = t.position.y + 0.5;
+      const candidateIds = this.spatialIndex.query(scannerUnit.position, range + BUILDING_FOOTPRINT_PAD);
+      for (const id of candidateIds) {
+        const e = this.entities.get(id);
+        if (!e || e.faction !== target) continue;
+        const tx = e.position.x + 0.5;
+        const ty = e.position.y + 0.5;
         const dx = sx - tx;
         const dy = sy - ty;
         if (dx * dx + dy * dy <= rSq) return true;

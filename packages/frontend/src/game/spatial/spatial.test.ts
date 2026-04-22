@@ -74,9 +74,11 @@ describe("SpatialIndex", () => {
   it("move updates position", () => {
     const idx = new SpatialIndex();
     idx.insert("u1", { x: 0, y: 0 });
-    idx.move("u1", { x: 5, y: 5 });
-    expect(idx.query({ x: 0, y: 0 }, 0)).not.toContain("u1");
-    expect(idx.query({ x: 5, y: 5 }, 0)).toContain("u1");
+    // Use far-apart coords so the move crosses bucket boundaries regardless
+    // of the internal bucket size — test validates semantics, not layout.
+    idx.move("u1", { x: 40, y: 40 });
+    expect(idx.queryCircle({ x: 0, y: 0 }, 1)).not.toContain("u1");
+    expect(idx.queryCircle({ x: 40, y: 40 }, 1)).toContain("u1");
   });
 
   it("query returns entities within radius", () => {
@@ -95,6 +97,23 @@ describe("SpatialIndex", () => {
     const result = idx.queryCircle({ x: 0, y: 0 }, 4);
     expect(result).toContain("edge");
     expect(result).not.toContain("corner");
+  });
+
+  it("padded Chebyshev query includes candidates whose multi-tile footprint reaches inside", () => {
+    // Documents the engine's footprint-padding contract: entities indexed at
+    // their top-left tile can have footprint extending several tiles further.
+    // Callers query with `radius + BUILDING_FOOTPRINT_PAD` (=4) using the
+    // Chebyshev `query` — so a 4×4 castle at (10,10) is included when a
+    // unit at (15,15) scans with base radius 2, even though the castle's
+    // indexed position is outside that base radius. The index itself is
+    // footprint-agnostic — the caller's precise `_distanceToTarget` helper
+    // then filters using the building's AABB.
+    const idx = new SpatialIndex();
+    idx.insert("castle", { x: 10, y: 10 }); // 4×4 footprint reaches to (13,13)
+    const baseRadius = 2;
+    const FOOTPRINT_PAD = 4;
+    const padded = idx.query({ x: 15, y: 15 }, baseRadius + FOOTPRINT_PAD);
+    expect(padded).toContain("castle");
   });
 });
 
