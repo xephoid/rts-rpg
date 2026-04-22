@@ -656,10 +656,14 @@ export class GameEngine {
     if (unit.stats.damage <= 0) return;
     const targetEntity = this.entities.get(targetId);
     if (!targetEntity) return;
-    // Non-combat treaty blocks attack orders toward signatories (Phase 14).
-    if (this._nonCombatTreaties[unit.faction][targetEntity.faction]) {
+    // Friendly factions (non-combat treaty OR mutual alignment above
+    // `friendlyAlignmentThreshold`) block attack orders toward each other.
+    if (this.arePeaceful(unit.faction, targetEntity.faction)) {
       if (this._isPlayerFaction(unit.faction)) {
-        this.onAlert?.(`Attack blocked — non-combat treaty with ${targetEntity.faction}`);
+        const reason = this._nonCombatTreaties[unit.faction][targetEntity.faction]
+          ? "non-combat treaty"
+          : "friendly alignment";
+        this.onAlert?.(`Attack blocked — ${reason} with ${targetEntity.faction}`);
       }
       return;
     }
@@ -2449,6 +2453,10 @@ export class GameEngine {
 
       const target = this.entities.get(state.targetId);
       if (!target || target.stats.hp <= 0) { unit.state = { kind: "idle" }; continue; }
+      // Peace arrived mid-chase (treaty signed or alignment climbed past
+      // the friendly threshold). Drop the attacker cleanly so they don't
+      // keep closing on a now-friendly unit/building.
+      if (this.arePeaceful(unit.faction, target.faction)) { unit.state = { kind: "idle" }; continue; }
       if (target.kind === "unit") {
         const tUnit = target as UnitEntity;
         if (tUnit.isFlying && !unit.canAttackAir) { unit.state = { kind: "idle" }; continue; }
@@ -2869,6 +2877,22 @@ export class GameEngine {
   /** True while a non-combat treaty is active between two factions. */
   hasNonCombatTreaty(a: Faction, b: Faction): boolean {
     return this._nonCombatTreaties[a][b];
+  }
+
+  /**
+   * True when `a` and `b` should not target each other in combat. Covers both
+   * formal non-combat treaties AND soft peace driven by mutual alignment
+   * clearing `diplomacyConfig.friendlyAlignmentThreshold` in BOTH directions.
+   * Every engine-level attack gate + AI target filter routes through this so
+   * friendliness is enforced uniformly — a single source of truth for "these
+   * two are at peace". Self-pairs always return true so an accidental
+   * friendly-fire filter never misfires on same-faction units.
+   */
+  arePeaceful(a: Faction, b: Faction): boolean {
+    if (a === b) return true;
+    if (this._nonCombatTreaties[a][b]) return true;
+    const th = diplomacyConfig.friendlyAlignmentThreshold;
+    return this._alignment[a][b] >= th && this._alignment[b][a] >= th;
   }
 
   /** True once A and B have had mutual sight contact (see `_updateMetFactions`).
@@ -3750,9 +3774,9 @@ export class GameEngine {
    */
   private _isTargetableBy(target: Entity, attackerFaction: Faction): boolean {
     if (target.kind !== "unit") {
-      // Buildings follow the same non-combat-treaty rule as units — an allied
-      // building can't be auto-aggroed or the mid-chase attack will keep landing.
-      if (this._nonCombatTreaties[attackerFaction][target.faction]) return false;
+      // Friendly factions (treaty OR high mutual alignment) block targeting
+      // their buildings too — auto-aggro skipping for a full peace pair.
+      if (this.arePeaceful(attackerFaction, target.faction)) return false;
       return true;
     }
     const u = target as UnitEntity;
@@ -3764,8 +3788,11 @@ export class GameEngine {
     // puppet off once it's lured away.
     if (u.tempControlTicks > 0) return false;
     if (u.faction === attackerFaction) return true;
-    // Non-combat treaty — bilateral attack ban. Auto-aggro skips allied units.
-    if (this._nonCombatTreaties[attackerFaction][u.faction]) return false;
+    // Friendly factions (non-combat treaty OR mutual alignment past
+    // `friendlyAlignmentThreshold`) — bilateral attack ban. Auto-aggro,
+    // garrison fire, ICP fire, and mid-chase attack resolution all skip
+    // friendly units.
+    if (this.arePeaceful(attackerFaction, u.faction)) return false;
     if (u.invisibilityActive || u.disguiseActive || u.concealed) {
       return this._detectedIdsThisTick[attackerFaction].has(u.id);
     }

@@ -54,6 +54,13 @@ export const diplomacy = {
   aiAcceptThreshold: 40,
   // Owner-facing alert fires on crossing ±threshold in either direction.
   alertThreshold: 40,
+  // Soft-peace threshold: once two factions' MUTUAL alignment (both
+  // directions) is at or above this value, they stop targeting each other in
+  // combat even without a formal non-combat treaty. Queued attack orders
+  // drop to idle, auto-aggro skips the pair, and AI attack waves filter
+  // them out — same gate as a treaty. Makes friendship meaningful without
+  // needing a proposal exchange.
+  friendlyAlignmentThreshold: 40, // Initial guess — mirrors aiAcceptThreshold
   // Discovery ("met") system: multiplier applied to the scanning unit's
   // sightRange to decide first-contact range. 1.0 uses sightRange directly;
   // lower/higher values tighten or loosen the meet radius without changing

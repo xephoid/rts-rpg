@@ -209,6 +209,43 @@ describe("Phase 14 — Diplomacy", () => {
   });
 });
 
+describe("Friendly alignment — soft peace without treaty", () => {
+  it("arePeaceful returns true once mutual alignment crosses friendlyAlignmentThreshold", () => {
+    const engine = makeEngine();
+    const th = diplomacyConfig.friendlyAlignmentThreshold;
+    engine.setAlignment("wizards", "robots", th + 5);
+    engine.setAlignment("robots", "wizards", th + 5);
+    expect(engine.arePeaceful("wizards", "robots")).toBe(true);
+    expect(engine.arePeaceful("robots", "wizards")).toBe(true);
+  });
+
+  it("arePeaceful returns false when only one side is friendly (asymmetric)", () => {
+    const engine = makeEngine();
+    const th = diplomacyConfig.friendlyAlignmentThreshold;
+    engine.setAlignment("wizards", "robots", th + 5);
+    engine.setAlignment("robots", "wizards", th - 20);
+    expect(engine.arePeaceful("wizards", "robots")).toBe(false);
+  });
+
+  it("issueAttackOrder is blocked when factions are mutually friendly", () => {
+    const engine = makeEngine(diplomacyConfig.friendlyAlignmentThreshold + 5);
+    const wStats = wizardUnitStats.evoker!;
+    const attacker = new UnitEntity({
+      faction: "wizards", typeKey: "evoker", position: { x: 15, y: 15 },
+      stats: {
+        maxHp: wStats.hp, damage: wStats.damage,
+        attackRange: wStats.attackRange, sightRange: wStats.sightRange,
+        speed: wStats.speed, charisma: wStats.charisma,
+        armor: wStats.armor, capacity: wStats.capacity,
+      },
+    });
+    engine.entities.add(attacker);
+    const target = spawnSpitter(engine, "robots", { x: 16, y: 15 });
+    engine.issueAttackOrder(attacker.id, target.id);
+    expect(attacker.state.kind).toBe("idle"); // rejected — mutual friendship
+  });
+});
+
 describe("Phase 14 — Discovery ('met') system", () => {
   it("units out of sight range keep the pair unmet", () => {
     const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });

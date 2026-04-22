@@ -66,6 +66,7 @@ export interface AIEngineInterface {
   bumpAlignment(from: Faction, toward: Faction, delta: number): void;
   getPendingProposals(): readonly DiplomaticProposal[];
   hasNonCombatTreaty(a: Faction, b: Faction): boolean;
+  arePeaceful(a: Faction, b: Faction): boolean;
   getFactionStats(faction: Faction): FactionStats;
   getActiveFactions(): readonly Faction[];
   hasCompletedResearch(faction: Faction, researchKey: string): boolean;
@@ -404,9 +405,11 @@ export class MilitaryAI {
       // A temp-controlled leader still reads as a friendly to its original faction.
       // Skip here too — threat/defence logic would otherwise swarm the AI's own puppet.
       if (u.tempControlTicks > 0) continue;
-      // Non-combat treaty partner — engine rejects attack orders against them
-      // anyway; filtering at threat-detection avoids wasted AI cycles.
-      if (engine.hasNonCombatTreaty(this.faction, u.faction)) continue;
+      // Friendly partner (treaty OR alignment-peace) — engine rejects attack
+      // orders against them anyway; filtering at threat-detection avoids
+      // wasted AI cycles and keeps the AI from flagging friendlies as threats
+      // just because they walked near the home.
+      if (engine.arePeaceful(this.faction, u.faction)) continue;
       if (_distSq(u.position, homeCenter) < THREAT_RADIUS * THREAT_RADIUS) threats.push(u);
     }
 
@@ -743,17 +746,18 @@ export class MilitaryAI {
     if (this.inAttack) return;
     if (ctx.idleArmy.length < this._attackThreshold(ctx.tick)) return;
 
-    // Short-circuit if every active opposing faction sits behind a non-combat
-    // treaty. `_issueAttackWave` would filter them all out, find no targets,
-    // no units would enter 'attacking', `inAttack` would flip back to false
+    // Short-circuit if every active opposing faction is peaceful with us
+    // (formal treaty OR alignment above `friendlyAlignmentThreshold`).
+    // `_issueAttackWave` would filter them all out, find no targets, no
+    // units would enter 'attacking', `inAttack` would flip back to false
     // next tick, and we'd burn every reaction loop re-launching empty waves.
     // Holding here lets the economy pass run normally and keeps combat units
-    // at rally until diplomacy changes or a new un-allied faction appears.
+    // at rally until diplomacy / alignment changes.
     const hasOpenEnemy = engine.getActiveFactions().some(
-      (f) => f !== this.faction && !engine.hasNonCombatTreaty(this.faction, f),
+      (f) => f !== this.faction && !engine.arePeaceful(this.faction, f),
     );
     if (!hasOpenEnemy) {
-      this._log(`push: all active enemies under non-combat treaty — holding (army=${ctx.idleArmy.length})`);
+      this._log(`push: all active enemies peaceful — holding (army=${ctx.idleArmy.length})`);
       return;
     }
 
@@ -1509,8 +1513,8 @@ function _issueAttackWave(
       // Temp-controlled leaders read as friendly to the puppeteer; the rest of the
       // AI shouldn't waste a wave on them either.
       e.tempControlTicks <= 0 &&
-      // Non-combat treaty partner is off-limits.
-      !engine.hasNonCombatTreaty(attackerFaction, e.faction),
+      // Peaceful partners (treaty OR friendly alignment) are off-limits.
+      !engine.arePeaceful(attackerFaction, e.faction),
     );
   const leaders = enemyUnits.filter((u) => LEADER_TYPES.has(u.typeKey));
   const nonLeaders = enemyUnits
@@ -1523,8 +1527,8 @@ function _issueAttackWave(
     let bd = Infinity;
     for (const e of enemies) {
       if (e.kind !== "building") continue;
-      // Skip treaty-partner buildings too — `issueAttackOrder` would reject anyway.
-      if (engine.hasNonCombatTreaty(attackerFaction, e.faction)) continue;
+      // Skip peaceful-faction buildings too — `issueAttackOrder` would reject anyway.
+      if (engine.arePeaceful(attackerFaction, e.faction)) continue;
       const d = _distSq(e.position, centroid);
       if (d < bd) { bd = d; bldg = e; }
     }

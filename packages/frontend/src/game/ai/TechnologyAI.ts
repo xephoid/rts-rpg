@@ -355,10 +355,13 @@ export class TechnologyAI {
     const threatRSq = THREAT_RADIUS * THREAT_RADIUS;
 
     // Enemies within threat radius — direct nearby combat units at them.
+    // Skip peaceful-faction units (treaty OR friendly alignment) so the
+    // tech AI doesn't pointlessly engage allies who wander near home.
     const threats: UnitEntity[] = [];
     for (const e of engine.entities.all()) {
       if (e.faction === this.faction) continue;
       if (e.kind !== "unit") continue;
+      if (engine.arePeaceful(this.faction, e.faction)) continue;
       if (_distSq(e.position, homeCenter) > threatRSq) continue;
       threats.push(e as UnitEntity);
     }
