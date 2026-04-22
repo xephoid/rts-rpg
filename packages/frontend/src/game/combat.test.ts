@@ -5,6 +5,8 @@ import { BuildingEntity } from "./entities/BuildingEntity.js";
 import {
   robotUnitStats,
   wizardBuildingStats,
+  wizardUnitStats,
+  namedLeaders,
 } from "@neither/shared";
 
 /**
@@ -97,5 +99,78 @@ describe("combat range vs buildings", () => {
     engine.issueAttackOrder(attacker.id, cottage.id);
     for (let t = 0; t < 60; t++) engine.stepTick(t, t * 16);
     expect(cottage.stats.hp).toBeLessThan(hpBefore);
+  });
+});
+
+describe("faction elimination alert", () => {
+  it("fires when a named leader dies — regardless of whose faction the leader belonged to", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      // Player is wizards, so the robot leader's death below is NOT the
+      // player's own-faction loss — the generic "destroyed" alert wouldn't
+      // fire for it. The elimination alert must fire anyway.
+      playerFaction: "wizards",
+      onTick: () => {},
+      onAlert: (msg) => { alerts.push(msg); },
+    });
+
+    // Spawn the robot leader at a separate position so the engine's starting
+    // motherboard isn't the one we kill. Use the shared named-leader config.
+    const mStats = robotUnitStats[namedLeaders.robots.typeKey]!;
+    const motherboard = new UnitEntity({
+      faction: "robots",
+      typeKey: namedLeaders.robots.typeKey,
+      position: { x: 40, y: 40 },
+      stats: {
+        maxHp: mStats.hpWood, damage: mStats.damage,
+        attackRange: mStats.attackRange, sightRange: mStats.sightRange,
+        speed: mStats.speed, charisma: mStats.charisma,
+        armor: mStats.armorWood, capacity: mStats.capacity,
+      },
+      isNamed: true,
+      name: namedLeaders.robots.name,
+    });
+    engine.entities.add(motherboard);
+
+    // Drive HP to zero and step once so _handleEntityDeath runs.
+    motherboard.stats.hp = 0;
+    engine.stepTick(0, 0);
+
+    expect(alerts.some((m) => m.includes("Robots eliminated"))).toBe(true);
+    expect(alerts.some((m) => m.includes(namedLeaders.robots.name))).toBe(true);
+  });
+
+  it("fires for the player's OWN leader — so the player sees the end-of-match moment", () => {
+    const alerts: string[] = [];
+    const engine = new GameEngine({
+      mapSize: "small",
+      seed: 1,
+      playerFaction: "wizards",
+      onTick: () => {},
+      onAlert: (msg) => { alerts.push(msg); },
+    });
+
+    const aStats = wizardUnitStats[namedLeaders.wizards.typeKey]!;
+    const archmage = new UnitEntity({
+      faction: "wizards",
+      typeKey: namedLeaders.wizards.typeKey,
+      position: { x: 40, y: 40 },
+      stats: {
+        maxHp: aStats.hp, damage: aStats.damage,
+        attackRange: aStats.attackRange, sightRange: aStats.sightRange,
+        speed: aStats.speed, charisma: aStats.charisma,
+        armor: aStats.armor, capacity: aStats.capacity,
+      },
+      isNamed: true,
+      name: namedLeaders.wizards.name,
+    });
+    engine.entities.add(archmage);
+
+    archmage.stats.hp = 0;
+    engine.stepTick(0, 0);
+
+    expect(alerts.some((m) => m.includes("Wizards eliminated"))).toBe(true);
   });
 });

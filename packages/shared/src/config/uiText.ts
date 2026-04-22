@@ -5,6 +5,13 @@ export const uiText = {
   factions: {
     wizards: "Wizards",
     robots: "Robots",
+    // Phase 14 N-faction display names. Stay terse — these are slot labels,
+    // not lore names. If the project adopts per-match named houses later,
+    // resolve at the app layer and fall back to these.
+    f3: "Faction 3",
+    f4: "Faction 4",
+    f5: "Faction 5",
+    f6: "Faction 6",
   },
   factionTaglines: {
     wizards: "Masters of mana and ancient magic.",
@@ -23,6 +30,12 @@ export const uiText = {
     youLose: "Defeat.",
     alertNearing: (faction: string, condition: string) =>
       `${faction} is nearing ${condition}!`,
+    /** Broadcast to every player whenever a faction's named leader is killed —
+     *  the leader's death is the spec's Military Victory trigger, so this
+     *  doubles as the "faction eliminated" announcement. Shown in the alert
+     *  log regardless of whose leader fell. */
+    alertFactionEliminated: (factionName: string, leaderName: string) =>
+      `${factionName} eliminated — ${leaderName} has fallen.`,
   },
   fog: {
     unexplored: "Unexplored",

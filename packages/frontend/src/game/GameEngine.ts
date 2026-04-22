@@ -2496,6 +2496,13 @@ export class GameEngine {
         const fallbackWinner = this.activeFactions.find((f) => f !== entity.faction) ?? entity.faction;
         const winFaction: Faction = killer ? killer.faction : fallbackWinner;
         this.events.queue("VictoryAlert", { faction: winFaction, condition: "military", pct: 100 });
+        // Broadcast a faction-elimination alert to the viewing player — fires
+        // regardless of whose leader died so every active game surfaces the
+        // end-of-faction moment. `_isPlayerFaction`-gated alerts above are
+        // only for own-faction unit losses; this is the louder global event.
+        const leaderName = entity.name ?? entity.typeKey;
+        const factionName = uiText.factions[entity.faction];
+        this.onAlert?.(uiText.victory.alertFactionEliminated(factionName, leaderName));
       }
     } else if (entity.kind === "building") {
       const building = this.entities.get(entity.id) as BuildingEntity | undefined;
