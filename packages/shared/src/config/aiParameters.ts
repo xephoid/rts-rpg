@@ -54,4 +54,9 @@ export const diplomacy = {
   aiAcceptThreshold: 40,
   // Owner-facing alert fires on crossing ±threshold in either direction.
   alertThreshold: 40,
+  // Discovery ("met") system: multiplier applied to the scanning unit's
+  // sightRange to decide first-contact range. 1.0 uses sightRange directly;
+  // lower/higher values tighten or loosen the meet radius without changing
+  // per-unit sight stats.
+  metDetectionRadiusMult: 1.0,
 };

@@ -179,6 +179,15 @@ export class GameEngine {
   private _nonCombatTreaties: Record<Faction, Record<Faction, boolean>> = fullFactionRecord(() => fullFactionRecord(() => false));
   private _pendingProposals: DiplomaticProposal[] = [];
   private _proposalIdCounter = 0;
+  /** Discovery state — `_metFactions[A][B]` is true once A has sighted any B unit
+   *  or building within one of A's own units' sightRange. Bilateral: both
+   *  directions flip together on first contact. Self-diagonal is always true so
+   *  the UI can safely list `metFactions[f].filter(other => other !== f)`. */
+  private _metFactions: Record<Faction, Record<Faction, boolean>> = (() => {
+    const r = fullFactionRecord(() => fullFactionRecord(() => false));
+    for (const f of FACTIONS) r[f][f] = true;
+    return r;
+  })();
   /** Snapshot of previous-tick alignment per faction, used to fire cross-threshold
    *  alerts once on transition rather than every tick while past the bound. */
   private _prevAlignment: Record<Faction, Record<Faction, number>> = fullFactionRecord(() => fullFactionRecord(() => 0));
@@ -2569,6 +2578,33 @@ export class GameEngine {
     return this._nonCombatTreaties[a][b];
   }
 
+  /** True once A and B have had mutual sight contact (see `_updateMetFactions`).
+   *  Self-diagonal always returns true so UI code can uniformly iterate slots. */
+  hasMet(a: Faction, b: Faction): boolean {
+    return this._metFactions[a][b];
+  }
+
+  /** Test/debug helper — flip the bilateral met flag without requiring an actual
+   *  sight-contact event. Does not fire the first-contact alert. */
+  setMet(a: Faction, b: Faction): void {
+    if (a === b) return;
+    this._metFactions[a][b] = true;
+    this._metFactions[b][a] = true;
+  }
+
+  /** Flat-list projection of `_metFactions` for snapshot emission. */
+  private _buildMetFactionsSnapshot(): Record<Faction, Faction[]> {
+    const out = fullFactionRecord<Faction[]>(() => []);
+    for (const f of FACTIONS) {
+      const list: Faction[] = [];
+      for (const other of FACTIONS) {
+        if (this._metFactions[f][other]) list.push(other);
+      }
+      out[f] = list;
+    }
+    return out;
+  }
+
   /**
    * Push a new diplomatic proposal into the pending queue. Rejects silently
    * when:
@@ -2588,6 +2624,10 @@ export class GameEngine {
     payload?: { resource?: { kind: "wood" | "water" | "mana"; amount: number }; unitId?: string },
   ): void {
     if (sender === target) return;
+    // Discovery gate: can't propose to a faction you haven't met. Silent reject
+    // matches the UX contract the DiplomacyPanel enforces (row hidden) so the
+    // engine stays defensive if something bypasses the UI.
+    if (!this._metFactions[sender][target]) return;
     if (this._pendingProposals.some((p) => p.from === sender && p.to === target && p.kind === kind)) {
       return;
     }
@@ -3159,6 +3199,7 @@ export class GameEngine {
     this._processClericHealing(tick);
     this._checkAlignmentTransitions();
     this._updateFog(tick);
+    this._updateMetFactions();
     this.events.flushDeferred();
 
     // Final safety net — remove any entities whose HP reached 0 this tick without the
@@ -3191,7 +3232,10 @@ export class GameEngine {
       spells: this._spellEvents.splice(0),
       factionStats: this._computeFactionStats(),
       detectedIds: detectedSnap,
-      diplomacy: { pendingProposals: [...this._pendingProposals] },
+      diplomacy: {
+        pendingProposals: [...this._pendingProposals],
+        metFactions: this._buildMetFactionsSnapshot(),
+      },
       factionSpecies: { ...this.factionSpecies },
       activeFactions: [...this.activeFactions],
     });
@@ -3381,6 +3425,67 @@ export class GameEngine {
     const tx = target.position.x + 0.5;
     const ty = target.position.y + 0.5;
     return Math.hypot(ax - tx, ay - ty);
+  }
+
+  /**
+   * Discovery / "met" scan. For every unmet pair (A, B) of active factions, scan
+   * A's units; if any A-unit has any B-owned entity within its sightRange
+   * (scaled by `metDetectionRadiusMult`), flip the bilateral flag and fire a
+   * first-contact alert for the player side.
+   *
+   * Short-circuits aggressively: once the flag is set it's never cleared, so
+   * the active pair set shrinks every match. Worst-case is still O(|active|²
+   * · units · r²), which is fine at 6 factions × ~50 units × ~r=10.
+   */
+  private _updateMetFactions(): void {
+    const active = this.activeFactions;
+    if (active.length < 2) return;
+
+    for (let i = 0; i < active.length; i++) {
+      const a = active[i]!;
+      for (let j = i + 1; j < active.length; j++) {
+        const b = active[j]!;
+        if (this._metFactions[a][b]) continue;
+
+        if (this._pairHasSightContact(a, b) || this._pairHasSightContact(b, a)) {
+          this._metFactions[a][b] = true;
+          this._metFactions[b][a] = true;
+          // Alert the human player if either side is them.
+          if (this._isPlayerFaction(a) || this._isPlayerFaction(b)) {
+            const other = a === this.playerFaction ? b : a;
+            this.onAlert?.(uiText.diplomacy.alertFirstContact(other));
+          }
+        }
+      }
+    }
+  }
+
+  /** True if any `scanner`-owned unit has a `target`-owned entity within its
+   *  (scaled) sightRange. Passengers / garrisoned / shelled units don't see. */
+  private _pairHasSightContact(scanner: Faction, target: Faction): boolean {
+    const mult = diplomacyConfig.metDetectionRadiusMult;
+    const targets = [
+      ...this.entities.unitsByFaction(target),
+      ...this.entities.buildingsByFaction(target),
+    ];
+    if (targets.length === 0) return false;
+
+    for (const scannerUnit of this.entities.unitsByFaction(scanner)) {
+      const k = scannerUnit.state.kind;
+      if (k === "platformShell" || k === "garrisoned" || k === "inPlatform") continue;
+      const range = scannerUnit.stats.sightRange * mult;
+      const rSq = range * range;
+      const sx = scannerUnit.position.x + 0.5;
+      const sy = scannerUnit.position.y + 0.5;
+      for (const t of targets) {
+        const tx = t.position.x + 0.5;
+        const ty = t.position.y + 0.5;
+        const dx = sx - tx;
+        const dy = sy - ty;
+        if (dx * dx + dy * dy <= rSq) return true;
+      }
+    }
+    return false;
   }
 
   private _updateFog(tick: number): void {

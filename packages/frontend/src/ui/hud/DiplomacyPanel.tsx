@@ -35,11 +35,18 @@ export function DiplomacyPanel() {
   const own = gameState.factionStats[activeFaction];
   const pending = gameState.diplomacy.pendingProposals;
   const incoming = pending.filter((p) => p.to === activeFaction);
-  const opposing = gameState.activeFactions.filter((f) => f !== activeFaction);
+  const met = new Set(gameState.diplomacy.metFactions[activeFaction]);
+  const opposing = gameState.activeFactions.filter((f) => f !== activeFaction && met.has(f));
 
   return (
     <div className={styles.panel}>
       <div className={styles.header}>{uiText.diplomacy.panelHeader}</div>
+
+      {opposing.length === 0 && (
+        <div className={styles.section}>
+          <div className={styles.empty}>{uiText.diplomacy.unmetNotice}</div>
+        </div>
+      )}
 
       {/* Alignment bars */}
       <div className={styles.section}>

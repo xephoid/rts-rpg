@@ -225,6 +225,11 @@ export type GameStateSnapshot = {
    *  `factionStats[*].openBorders` / `nonCombatTreaties`. */
   diplomacy: {
     pendingProposals: DiplomaticProposal[];
+    /** Per-faction list of factions this one has "met" (mutual sight contact).
+     *  Bilateral: if X ∈ metFactions[Y] then Y ∈ metFactions[X]. Diplomacy UI
+     *  gates proposal rows on this. A faction is always counted as having met
+     *  itself (self entry is always present). */
+    metFactions: Record<Faction, Faction[]>;
   };
   /** Which species each faction is playing. Inactive slots default to `"wizards"`
    *  but should be filtered by `activeFactions` before display. */

@@ -70,5 +70,7 @@ export const uiText = {
       `${other} gave us ${unitName}`,
     alertAlignmentHigh: (other: string) => `${other} is now friendly toward us`,
     alertAlignmentLow: (other: string) => `${other} is now hostile toward us`,
+    alertFirstContact: (other: string) => `First contact: ${other}. Diplomatic relations are now open.`,
+    unmetNotice: "You have not yet met this faction.",
   },
 } as const;

@@ -9,6 +9,9 @@ import {
 
 function makeEngine(seedAlignment = 0): GameEngine {
   const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+  // Diplomacy tests exercise proposal flow, not discovery — short-circuit the
+  // meeting gate so every test doesn't have to march units into sight range.
+  engine.setMet("wizards", "robots");
   if (seedAlignment !== 0) {
     engine.setAlignment("wizards", "robots", seedAlignment);
     engine.setAlignment("robots", "wizards", seedAlignment);
@@ -62,6 +65,7 @@ describe("Phase 14 — Diplomacy", () => {
     const engine = new GameEngine({
       mapSize: "small", seed: 1, playerFaction: "wizards", onTick: () => {},
     });
+    engine.setMet("wizards", "robots");
     engine.setAlignment("robots", "wizards", diplomacyConfig.aiAcceptThreshold + 5);
     engine.issueProposeDiplomaticAction("wizards", "robots", "openBorders");
     // Tick once so the AI runs its _respondToProposals pass.
@@ -80,6 +84,7 @@ describe("Phase 14 — Diplomacy", () => {
       mapSize: "small", seed: 2, playerFaction: "wizards",
       onTick: (s) => { snapshotOB = s.factionStats.wizards.openBorders.robots; },
     });
+    engine2.setMet("wizards", "robots");
     engine2.setAlignment("robots", "wizards", diplomacyConfig.aiAcceptThreshold + 5);
     engine2.issueProposeDiplomaticAction("wizards", "robots", "openBorders");
     engine2.stepTick(0, 0);
@@ -90,6 +95,7 @@ describe("Phase 14 — Diplomacy", () => {
     const engine = new GameEngine({
       mapSize: "small", seed: 1, playerFaction: "wizards", onTick: () => {},
     });
+    engine.setMet("wizards", "robots");
     engine.setAlignment("robots", "wizards", diplomacyConfig.aiAcceptThreshold + 5);
     engine.issueProposeDiplomaticAction("wizards", "robots", "nonCombat");
     engine.stepTick(0, 0);
@@ -180,6 +186,7 @@ describe("Phase 14 — Diplomacy", () => {
       mapSize: "small", seed: 5,
       onTick: (s) => { fogSnapshot = s.fog.wizards.data; },
     });
+    engine.setMet("wizards", "robots");
     // Place a robot unit far from any wizard unit. Without open borders, the
     // tile under it stays unexplored for wizards.
     const robot = spawnSpitter(engine, "robots", { x: 40, y: 40 });
@@ -199,5 +206,58 @@ describe("Phase 14 — Diplomacy", () => {
     const postData = fogSnapshot as unknown as Uint8Array | number[];
     const post = postData[idx] ?? 0;
     expect(post).toBeGreaterThan(0);
+  });
+});
+
+describe("Phase 14 — Discovery ('met') system", () => {
+  it("units out of sight range keep the pair unmet", () => {
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+    // `_spawnStartingEntities` places wizards + robots at far corners. One
+    // tick is not enough for either side's starting sightRange to reach.
+    engine.stepTick(0, 0);
+    expect(engine.hasMet("wizards", "robots")).toBe(false);
+  });
+
+  it("sight contact flips the bilateral flag + fires first-contact alert", () => {
+    let alertFired: string | null = null;
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards",
+      onTick: () => {},
+      onAlert: (msg) => { if (msg.startsWith("First contact:")) alertFired = msg; },
+    });
+    // Drop a wizard observer next to a robot spitter so they're within one
+    // another's sight range immediately.
+    const wStats = wizardUnitStats.surf!;
+    const observer = new UnitEntity({
+      faction: "wizards",
+      typeKey: "surf",
+      position: { x: 20, y: 20 },
+      stats: {
+        maxHp: wStats.hp, damage: wStats.damage,
+        attackRange: wStats.attackRange, sightRange: wStats.sightRange,
+        speed: wStats.speed, charisma: wStats.charisma,
+        armor: wStats.armor, capacity: wStats.capacity,
+      },
+    });
+    engine.entities.add(observer);
+    spawnSpitter(engine, "robots", { x: 21, y: 20 });
+
+    engine.stepTick(0, 0);
+
+    expect(engine.hasMet("wizards", "robots")).toBe(true);
+    expect(engine.hasMet("robots", "wizards")).toBe(true);
+    expect(alertFired).not.toBeNull();
+  });
+
+  it("issueProposeDiplomaticAction silently rejects while factions are unmet", () => {
+    // Headless — no AI ticks interfering.
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+    // Do NOT call setMet — the pair stays unmet.
+    engine.issueProposeDiplomaticAction("wizards", "robots", "openBorders");
+    expect(engine.getPendingProposals()).toHaveLength(0);
+    // After meeting, the same call succeeds.
+    engine.setMet("wizards", "robots");
+    engine.issueProposeDiplomaticAction("wizards", "robots", "openBorders");
+    expect(engine.getPendingProposals()).toHaveLength(1);
   });
 });
