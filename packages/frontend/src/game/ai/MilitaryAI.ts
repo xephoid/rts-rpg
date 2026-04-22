@@ -62,6 +62,12 @@ export interface AIEngineInterface {
   issueResearchOrder(buildingId: string, researchKey: string): void;
   issueConvertOrder(casterId: string, targetId: string): void;
   issueRespondToProposal(proposalId: string, accept: boolean): void;
+  issueProposeDiplomaticAction(
+    sender: Faction,
+    target: Faction,
+    kind: "openBorders" | "nonCombat" | "resourceRequest" | "unitRequest",
+    payload?: { resource?: { kind: "wood" | "water" | "mana"; amount: number }; unitId?: string },
+  ): void;
   getAlignment(from: Faction, toward: Faction): number;
   bumpAlignment(from: Faction, toward: Faction, delta: number): void;
   getPendingProposals(): readonly DiplomaticProposal[];

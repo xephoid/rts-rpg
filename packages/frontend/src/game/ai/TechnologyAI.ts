@@ -89,6 +89,7 @@ export class TechnologyAI {
     this._queueAllResearch(engine, buildings, resources);
     this._produceMissingOwnSpeciesUnits(engine, units, buildings);
     this._defendBase(engine, units, buildings);
+    this._proposeDiplomacy(engine);
     this._huntForConvert(engine, units);
     this._respondToProposals(engine);
   }
@@ -379,10 +380,15 @@ export class TechnologyAI {
   // ── Convert hunts ──────────────────────────────────────────────────────────
 
   private _huntForConvert(engine: AIEngineInterface, units: UnitEntity[]): void {
-    // Find an idle caster (leader or civilian) with a path to an opposing unit
-    // whose typeKey we haven't unlocked. Move adjacent, then fire Convert.
+    // Leaders are OFF-LIMITS as convert casters. A leader death = immediate
+    // Military Victory loss for this faction; sending the Archmage /
+    // Motherboard into enemy territory for a convert gamble is a strictly
+    // dominated play. Civilians (Subject / Core) only.
+    const leaderKey = namedLeaders[this.species].typeKey;
     const casters = units.filter(
-      (u) => CONVERT_CASTER_TYPES.has(u.typeKey) && u.state.kind === "idle",
+      (u) => CONVERT_CASTER_TYPES.has(u.typeKey)
+        && u.typeKey !== leaderKey
+        && u.state.kind === "idle",
     );
     if (casters.length === 0) return;
 
@@ -408,6 +414,12 @@ export class TechnologyAI {
       if (ue.cannotBeConverted) continue;
       if (ue.state.kind === "platformShell" || ue.state.kind === "garrisoned" ||
           ue.state.kind === "inPlatform" || ue.state.kind === "hidingInBuilding") continue;
+      // Threat gate — don't send a civilian into a cluster of enemy
+      // combat units. Scan within a threat radius around the candidate
+      // target; if hostile damage-per-tick nearby exceeds a safe budget,
+      // skip this target entirely. Keeps the tech AI from feeding its
+      // Subjects / Cores to a standing army.
+      if (this._targetIsUnsafe(engine, ue)) continue;
       // Closest approach from any of our units — proxy for "reachable".
       let d = Infinity;
       for (const p of myPositions) d = Math.min(d, _distSq(p, ue.position));
@@ -443,7 +455,102 @@ export class TechnologyAI {
     return false;
   }
 
+  // ── Threat assessment for Convert hunts ───────────────────────────────────
+
+  /**
+   * Estimate whether a convert-hunt target is safe to approach. Scans a
+   * small radius around the target for opposing combat units that could
+   * interrupt the caster mid-convert (8s of sustained adjacency is a long
+   * window for a solo civilian). If the summed enemy damage-per-interval
+   * within the radius exceeds a safe budget, the target is classed as
+   * unsafe and the hunt skips it. Combat units near our OWN side of the
+   * map are still fair game — this filter only trips on targets deep in
+   * enemy territory.
+   */
+  private _targetIsUnsafe(engine: AIEngineInterface, target: UnitEntity): boolean {
+    // Radius — generous enough to include units that could cover the
+    // 8-tile approach, not so large that any nearby patrol scares us off.
+    const THREAT_SCAN_RADIUS = 6;
+    const rSq = THREAT_SCAN_RADIUS * THREAT_SCAN_RADIUS;
+    // Safe damage budget. A Subject has ~100 HP; one Spitter hit is ~20
+    // damage, so 40 means "at most two attackers in range before we
+    // abort". Initial guess; tune after playtest.
+    const SAFE_DMG_BUDGET = 40;
+
+    let hostileDmg = 0;
+    for (const e of engine.entities.all()) {
+      if (e.kind !== "unit") continue;
+      if (e.faction === this.faction) continue;
+      if (e.faction === target.faction) continue; // target's OWN escort isn't hostile to the target
+      if (engine.arePeaceful(this.faction, e.faction)) continue;
+      if (_distSq(e.position, target.position) > rSq) continue;
+      if (e.stats.damage <= 0) continue;
+      hostileDmg += e.stats.damage;
+      if (hostileDmg > SAFE_DMG_BUDGET) return true;
+    }
+    // Also inspect units of the TARGET's faction — they'll defend. A target
+    // standing in the middle of a standing army is unsafe even though the
+    // army isn't "hostile" to us by faction-list logic (it's our convert
+    // victim's protection). Same radius, same budget.
+    let defenderDmg = 0;
+    for (const e of engine.entities.all()) {
+      if (e.kind !== "unit") continue;
+      if (e.faction !== target.faction) continue;
+      if (e.id === target.id) continue;
+      if (_distSq(e.position, target.position) > rSq) continue;
+      if (e.stats.damage <= 0) continue;
+      defenderDmg += e.stats.damage;
+      if (defenderDmg > SAFE_DMG_BUDGET) return true;
+    }
+    return false;
+  }
+
   // ── Diplomacy ──────────────────────────────────────────────────────────────
+
+  /**
+   * Proactively propose peace with every met faction whose alignment has
+   * climbed high enough to likely accept. Prefers Open Borders (shared
+   * vision + non-aggression) then Non-Combat Treaty (hard bilateral
+   * attack ban). Soft peace (alignment ≥ friendly threshold) is NOT a
+   * substitute for a treaty — alignment can drop mid-match, treaties are
+   * permanent. So we propose even when `arePeaceful` currently returns
+   * true; we just skip the specific treaty type if it's already signed.
+   * One proposal per faction per tick; duplicate pending sends are
+   * suppressed via `pendingProposals`.
+   */
+  private _proposeDiplomacy(engine: AIEngineInterface): void {
+    const minAlignment = diplomacyConfig.aiAcceptThreshold;
+    const pending = engine.getPendingProposals();
+
+    for (const other of engine.getActiveFactions()) {
+      if (other === this.faction) continue;
+      const align = engine.getAlignment(this.faction, other);
+      if (align < minAlignment) continue;
+
+      // Open Borders first — tech AI wants shared vision for cross-species
+      // unit scouting (fuels the Convert hunt target picker).
+      const ownStats = engine.getFactionStats(this.faction);
+      const obSigned = ownStats.openBorders[other] === true;
+      const alreadyProposedOB = pending.some(
+        (p) => p.from === this.faction && p.to === other && p.kind === "openBorders",
+      );
+      if (!obSigned && !alreadyProposedOB) {
+        engine.issueProposeDiplomaticAction(this.faction, other, "openBorders");
+        this._log(`propose openBorders → ${other} (align=${align.toFixed(0)})`);
+        continue;
+      }
+
+      // Non-combat next — locks in peace even if alignment later drops.
+      const ncSigned = engine.hasNonCombatTreaty(this.faction, other);
+      const alreadyProposedNC = pending.some(
+        (p) => p.from === this.faction && p.to === other && p.kind === "nonCombat",
+      );
+      if (!ncSigned && !alreadyProposedNC) {
+        engine.issueProposeDiplomaticAction(this.faction, other, "nonCombat");
+        this._log(`propose nonCombat → ${other} (align=${align.toFixed(0)})`);
+      }
+    }
+  }
 
   private _respondToProposals(engine: AIEngineInterface): void {
     // Tech AI accepts proposals at a lower alignment threshold than Military —
