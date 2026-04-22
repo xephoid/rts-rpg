@@ -610,7 +610,16 @@ export class GameRenderer {
         sprite.tint = baseTint;
       }
       // Own invisible illusionist: semi-transparent to signal the toggle is on.
-      sprite.alpha = entity.kind === "unit" && entity.faction === this.activeFaction && entity.invisible ? 0.5 : 1.0;
+      // Own invisible → translucent. Own disguised → 0.8 alpha so the player gets an
+      // unmistakable visual cue that the spy ability is currently active (prevents
+      // the "I thought I disguised it" playtest foot-gun).
+      if (entity.kind === "unit" && entity.faction === this.activeFaction) {
+        if (entity.invisible) sprite.alpha = 0.5;
+        else if (entity.disguised) sprite.alpha = 0.8;
+        else sprite.alpha = 1.0;
+      } else {
+        sprite.alpha = 1.0;
+      }
 
       const fogVal = this._fogValueAt(entity.position.x, entity.position.y);
       sprite.visible = fogVal === 2 || (fogVal === 1 && entity.kind === "building");
