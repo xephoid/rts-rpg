@@ -15,7 +15,7 @@
  * as a panic override when the base is overrun.
  */
 
-import type { Faction, Species, Vec2 } from "@neither/shared";
+import type { Faction, FactionStats, Species, Vec2 } from "@neither/shared";
 import {
   aiParameters,
   buildingProduction,
@@ -62,8 +62,11 @@ export interface AIEngineInterface {
   issueResearchOrder(buildingId: string, researchKey: string): void;
   issueRespondToProposal(proposalId: string, accept: boolean): void;
   getAlignment(from: Faction, toward: Faction): number;
+  bumpAlignment(from: Faction, toward: Faction, delta: number): void;
   getPendingProposals(): readonly DiplomaticProposal[];
   hasNonCombatTreaty(a: Faction, b: Faction): boolean;
+  getFactionStats(faction: Faction): FactionStats;
+  getActiveFactions(): readonly Faction[];
 }
 
 // ── Faction roles ───────────────────────────────────────────────────────────
@@ -350,9 +353,15 @@ export class MilitaryAI {
     // the leader contributes population + charisma either way, no real downside.
     this._hideLeader(engine, ctx);
 
-    // Diplomacy (Phase 14): auto-respond to any pending proposals addressed
-    // at this AI faction. Military archetype is conservative — accepts only
-    // when alignment toward the sender has climbed above the configured gate.
+    // Diplomacy (Phase 14): appeasement — bump alignment toward any faction
+    // militarily dominant over us. Runs BEFORE the proposal response pass so
+    // a fresh bump can tip a borderline alignment over the accept threshold in
+    // the same tick the proposal arrives.
+    this._appeaseStrongerFactions(engine);
+
+    // Auto-respond to any pending proposals addressed at this AI faction.
+    // Military archetype is conservative — accepts only when alignment toward
+    // the sender has climbed above the configured gate.
     this._respondToProposals(engine);
 
     if (!this.hasScouted && tick >= SCOUT_DELAY_TICKS) {
@@ -1072,6 +1081,27 @@ export class MilitaryAI {
       const accept = align >= diplomacyConfig.aiAcceptThreshold;
       engine.issueRespondToProposal(p.id, accept);
       this._log(`proposal ${p.kind} from ${p.from} → ${accept ? "ACCEPT" : "DECLINE"} (align=${align.toFixed(0)})`);
+    }
+  }
+
+  /**
+   * Appeasement rule — each reaction tick, for every opposing faction whose
+   * militaryStrength > self × `appeasementRatio`, bump alignment toward them
+   * by `appeasementPerTick`. Guards against divide-by-zero when self has no
+   * combat units yet (very early game). Capped by the engine's alignment
+   * clamp so this can't overflow the scale.
+   */
+  private _appeaseStrongerFactions(engine: AIEngineInterface): void {
+    const mine = engine.getFactionStats(this.faction).militaryStrength;
+    if (mine <= 0) return;
+    const ratio = diplomacyConfig.appeasementRatio;
+    const delta = diplomacyConfig.appeasementPerTick;
+    for (const other of engine.getActiveFactions()) {
+      if (other === this.faction) continue;
+      const theirs = engine.getFactionStats(other).militaryStrength;
+      if (theirs / mine > ratio) {
+        engine.bumpAlignment(this.faction, other, delta);
+      }
     }
   }
 

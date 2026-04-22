@@ -261,3 +261,78 @@ describe("Phase 14 — Discovery ('met') system", () => {
     expect(engine.getPendingProposals()).toHaveLength(1);
   });
 });
+
+describe("Phase 14 — Appeasement rule", () => {
+  /** Spawn N inflated evokers for a faction — used to dwarf the opposing
+   *  starting army without interfering via combat (placed far from enemy). */
+  function inflateWizardArmy(engine: GameEngine, faction: "wizards" | "robots", count: number): void {
+    const wStats = wizardUnitStats.evoker!;
+    for (let i = 0; i < count; i++) {
+      engine.entities.add(new UnitEntity({
+        faction,
+        typeKey: "evoker",
+        position: { x: 50 + (i % 5), y: 50 + Math.floor(i / 5) },
+        stats: {
+          maxHp: wStats.hp, damage: wStats.damage * 10,
+          attackRange: wStats.attackRange, sightRange: wStats.sightRange,
+          speed: wStats.speed, charisma: wStats.charisma,
+          armor: wStats.armor, capacity: wStats.capacity,
+        },
+      }));
+    }
+  }
+
+  it("AI bumps alignment toward a militarily dominant opposing faction", () => {
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards", onTick: () => {},
+    });
+    engine.setMet("wizards", "robots");
+    // Stack wizard army far from combat so militaryStrength shoots past the
+    // appeasement ratio without triggering any actual fights.
+    inflateWizardArmy(engine, "wizards", 10);
+
+    const pre = engine.getAlignment("robots", "wizards");
+    // AI reactionIntervalTicks=60. Three reactions is enough to register
+    // several appeasement bumps above float-noise thresholds.
+    for (let t = 0; t < 200; t++) engine.stepTick(t, t * 16);
+    const post = engine.getAlignment("robots", "wizards");
+    expect(post).toBeGreaterThan(pre);
+  });
+
+  it("no appeasement when self has no military strength yet", () => {
+    // `_appeaseStrongerFactions` short-circuits when mine === 0 to avoid a
+    // divide-by-zero explosion right at match start. Verify the guard by
+    // stripping the robot starting army before the AI's first reaction.
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards", onTick: () => {},
+    });
+    engine.setMet("wizards", "robots");
+    // Spawn dominant wizard army.
+    inflateWizardArmy(engine, "wizards", 10);
+    // Remove robot military units so robot militaryStrength = 0.
+    for (const u of engine.entities.unitsByFaction("robots")) {
+      engine.entities.remove(u.id);
+    }
+    const pre = engine.getAlignment("robots", "wizards");
+    engine.stepTick(0, 0); // one AI reaction
+    const post = engine.getAlignment("robots", "wizards");
+    expect(post).toBe(pre);
+  });
+
+  it("gap closes: appeasement stops when strengths equalize", () => {
+    const engine = new GameEngine({
+      mapSize: "small", seed: 1, playerFaction: "wizards", onTick: () => {},
+    });
+    engine.setMet("wizards", "robots");
+    // Both sides equally inflated → ratio === 1.0 < 1.5 → no bump.
+    inflateWizardArmy(engine, "wizards", 10);
+    inflateWizardArmy(engine, "robots", 10);
+
+    const pre = engine.getAlignment("robots", "wizards");
+    for (let t = 0; t < 200; t++) engine.stepTick(t, t * 16);
+    const post = engine.getAlignment("robots", "wizards");
+    // Combat damage from the AI pushing units around may drop alignment, but
+    // the appeasement pass itself should not RAISE it. Assert post ≤ pre.
+    expect(post).toBeLessThanOrEqual(pre);
+  });
+});

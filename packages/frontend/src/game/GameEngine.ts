@@ -2573,6 +2573,17 @@ export class GameEngine {
     return this._pendingProposals;
   }
 
+  /** Snapshot-shape faction stats for a single faction. Recomputes — cheap,
+   *  and lets AI archetypes read militaryStrength without a fresh tick. */
+  getFactionStats(faction: Faction): FactionStats {
+    return this._computeFactionStats()[faction];
+  }
+
+  /** The active-faction roster for this match (2/4/6 depending on map size). */
+  getActiveFactions(): readonly Faction[] {
+    return this.activeFactions;
+  }
+
   /** True while a non-combat treaty is active between two factions. */
   hasNonCombatTreaty(a: Faction, b: Faction): boolean {
     return this._nonCombatTreaties[a][b];
@@ -2727,6 +2738,12 @@ export class GameEngine {
 
   private _adjustAlignment(from: Faction, toward: Faction, delta: number): void {
     this._alignment[from][toward] = this._clampAlignment(this._alignment[from][toward] + delta);
+  }
+
+  /** Public alignment nudge used by AI archetypes (e.g. MilitaryAI appeasement).
+   *  Clamped to the config's min/max. Unilateral — call twice for bilateral. */
+  bumpAlignment(from: Faction, toward: Faction, delta: number): void {
+    this._adjustAlignment(from, toward, delta);
   }
 
   /** Fire a one-shot alert when alignment crosses ±`alertThreshold` in either

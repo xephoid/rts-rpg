@@ -59,4 +59,11 @@ export const diplomacy = {
   // lower/higher values tighten or loosen the meet radius without changing
   // per-unit sight stats.
   metDetectionRadiusMult: 1.0,
+  // Appeasement rule (MilitaryAI archetype): each AI reaction tick, for every
+  // opposing faction whose militaryStrength exceeds self's by this ratio, the
+  // AI nudges its alignment toward them by `appeasementPerTick`. Stacking
+  // intent is that weak factions climb toward accept-threshold so stronger
+  // ones can force a treaty through while they're dominant.
+  appeasementRatio: 1.5,      // Initial guess — opposing/self military strength threshold
+  appeasementPerTick: 0.05,   // Initial guess — alignment bump per AI reaction tick
 };
