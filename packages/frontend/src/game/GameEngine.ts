@@ -2076,7 +2076,7 @@ export class GameEngine {
 
     if (!stats) return;
 
-    const spawnPos = this._findSpawnTile(building);
+    const spawnPos = this._findSpawnTile(building, isFlying);
     if (!spawnPos) return;
 
     const unit = new UnitEntity({
@@ -2095,13 +2095,16 @@ export class GameEngine {
     this.entities.add(unit);
   }
 
-  private _findSpawnTile(building: BuildingEntity): Vec2 | null {
+  private _findSpawnTile(building: BuildingEntity, isFlying = false): Vec2 | null {
     const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
     const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
     const bx = Math.floor(building.position.x);
     const by = Math.floor(building.position.y);
 
-    // Check tiles in an expanding ring just outside the building footprint
+    // Check tiles in an expanding ring just outside the building footprint.
+    // Flyers get the flying-layer occupancy check so newly spawned Stingers /
+    // Probes don't stack on top of each other; ground units still only collide
+    // with other ground units.
     for (let r = 1; r <= 8; r++) {
       for (let dy = -r; dy < fp + r; dy++) {
         for (let dx = -r; dx < fp + r; dx++) {
@@ -2110,7 +2113,9 @@ export class GameEngine {
           if (!onPerimeter) continue;
           const tx = bx + dx;
           const ty = by + dy;
-          if (this.grid.isPassable(tx, ty) && !this._tileOccupiedByUnit(tx, ty, "", false)) {
+          // Flyers ignore terrain blockers (they can perch over water / forest).
+          const terrainOk = isFlying ? this.grid.inBounds(tx, ty) : this.grid.isPassable(tx, ty);
+          if (terrainOk && !this._tileOccupiedByUnit(tx, ty, "", isFlying)) {
             return { x: tx, y: ty };
           }
         }

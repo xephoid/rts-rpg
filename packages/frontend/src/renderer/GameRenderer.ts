@@ -644,6 +644,17 @@ export class GameRenderer {
       if (visible && entity.kind === "building" && entity.garrisonedUnitId) {
         this._drawCoreIndicator(entity, 0xffffff);
       }
+      // Multi-occupant buildings (ICP with Cores, Cottage / Recharge Station with
+      // hidden units) get one dot per occupant along the top edge of the footprint.
+      // Garrisoned towers are handled by the single-dot path above.
+      if (
+        visible &&
+        entity.kind === "building" &&
+        !entity.garrisonedUnitId &&
+        (entity.occupantCount ?? 0) > 0
+      ) {
+        this._drawOccupantDots(entity, entity.occupantCount ?? 0);
+      }
     }
   }
 
@@ -654,6 +665,27 @@ export class GameRenderer {
     this.selectionGfx
       .circle(cx, cy, 4)
       .fill({ color, alpha: 0.95 });
+  }
+
+  /** Draw N dots along the top edge of a building's footprint — one per occupant.
+   *  Used for Immobile Combat Platform (Cores) and Cottage / Recharge Station
+   *  (hidden civilian/leader). Caps at 8 visible dots so a fully-stacked building
+   *  doesn't overflow its sprite bounds. */
+  private _drawOccupantDots(entity: EntitySnapshot, count: number): void {
+    if (!this.selectionGfx) return;
+    const fp = this._getFootprint(entity);
+    const displayCount = Math.min(count, 8);
+    // Spread dots across the top edge of the footprint, centred.
+    const spacing = 0.22; // tiles between dot centres
+    const totalWidth = (displayCount - 1) * spacing;
+    const startX = entity.position.x + (fp - totalWidth) / 2;
+    const cy = (entity.position.y + 0.15) * TILE_SIZE;
+    for (let i = 0; i < displayCount; i++) {
+      const cx = (startX + i * spacing) * TILE_SIZE;
+      this.selectionGfx
+        .circle(cx, cy, 4)
+        .fill({ color: 0xffffff, alpha: 0.95 });
+    }
   }
 
   private _drawSelectionRing(entity: EntitySnapshot): void {

@@ -544,6 +544,10 @@ export function CommandsPanel() {
                   Cancel
                 </button>
               );
+              // Infiltrator is robot; disguise roster is the wizard unit list.
+              // Mirror the production-button layout so it looks consistent.
+              const disguiseFaction: "wizards" | "robots" =
+                entity.faction === "robots" ? "wizards" : "robots";
               for (const targetKey of Object.keys(wizardUnitStats)) {
                 buttons.push(
                   <button
@@ -552,7 +556,13 @@ export function CommandsPanel() {
                     onClick={() => issueDisguiseAction(entity.id, targetKey)}
                     title={`Disguise as ${formatTypeKey(targetKey)}`}
                   >
-                    {formatTypeKey(targetKey)}
+                    <img
+                      src={unitSpritePath(disguiseFaction, targetKey)}
+                      className={styles.prodIcon}
+                      alt={formatTypeKey(targetKey)}
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                    <span className={styles.prodLabel}>{formatTypeKey(targetKey)}</span>
                   </button>
                 );
               }
