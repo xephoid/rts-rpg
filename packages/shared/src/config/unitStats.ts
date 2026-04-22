@@ -68,7 +68,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     charisma: 10,
     armorWood: 2,
     armorMetal: 6,
-    capacity: 20,
+    capacity: 0,
     attackIntervalSec: 2.0, // Initial guess
   },
   waterCollectionPlatform: {
@@ -82,7 +82,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     charisma: 2,
     armorWood: 3,
     armorMetal: 8,
-    capacity: 15,
+    capacity: 5,
     attackIntervalSec: 2.0, // Initial guess
   },
   woodChopperPlatform: {
@@ -96,7 +96,7 @@ export const robotUnitStats: Record<string, UnitStatBlock> = {
     charisma: 2,
     armorWood: 4,
     armorMetal: 10,
-    capacity: 18,
+    capacity: 6,
     attackIntervalSec: 1.5, // Initial guess
   },
   movableBuildKitPlatform: {
@@ -246,7 +246,7 @@ export const wizardUnitStats: Record<string, WizardStatBlock> = {
     speed: 1.8,
     charisma: 5,
     armor: 4,
-    capacity: 25,
+    capacity: 8,
     attackIntervalSec: 1.0, // Initial guess
   },
   subject: {

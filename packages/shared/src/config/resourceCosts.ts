@@ -12,10 +12,10 @@ export const gatherRates = {
 };
 
 /** Ticks between each harvest action. Higher = slower gathering. 4 = 1/4 of single-tick speed. */
-export const GATHER_INTERVAL_TICKS = 4;
+export const GATHER_INTERVAL_TICKS = 20;
 
 /** XP awarded to a gatherer on each successful resource delivery. Initial guess. */
-export const gatherXpPerTrip = 5;
+export const gatherXpPerTrip = 2;
 
 export type UnitCost = {
   wood: number;

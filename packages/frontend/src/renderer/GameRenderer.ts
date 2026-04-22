@@ -379,9 +379,15 @@ export class GameRenderer {
   }
 
   /** True while a unit is tucked inside a container (tower, platform, cottage, etc.)
-   *  and must not appear in any selection, hit-test, or right-click routing. */
+   *  and must not appear in any selection, hit-test, or right-click routing.
+   *
+   *  Exception: an `inEnemyBuilding` infiltrator stays visible and selectable for
+   *  its OWNER so the player can drive the attack-from-inside mechanic. The unit
+   *  remains untargetable for combat (handled in the engine's `_isTargetableBy`)
+   *  so opponents can't hit it through the wall. */
   private _isInsideContainer(e: EntitySnapshot): boolean {
     if (e.kind !== "unit") return false;
+    if (e.inEnemyBuilding && e.faction === this.activeFaction) return false;
     return !!(e.isShell || e.garrisoned || e.inPlatform || e.hidden || e.inEnemyBuilding);
   }
 
@@ -394,6 +400,28 @@ export class GameRenderer {
     if (e.faction === this.activeFaction) return true;
     if (e.invisible && !this.lastDetectedIds.has(e.id)) return false;
     return true;
+  }
+
+  /** Top-most entity under `(tileX, tileY)` that the viewer can interact with.
+   *  Prefers units over buildings on the same tile so an infiltrator standing on
+   *  an enemy cottage (via `inEnemyBuilding`) can be left-clicked; click-through
+   *  to the cottage still works whenever no unit is present. */
+  private _topHitAt(tileX: number, tileY: number): EntitySnapshot | null {
+    const unitHit = this.lastEntities.find(
+      (e) =>
+        e.kind === "unit" &&
+        !this._isInsideContainer(e) &&
+        this._isHitVisible(e) &&
+        this._hitTest(e, tileX, tileY),
+    );
+    if (unitHit) return unitHit;
+    return this.lastEntities.find(
+      (e) =>
+        e.kind === "building" &&
+        !this._isInsideContainer(e) &&
+        this._isHitVisible(e) &&
+        this._hitTest(e, tileX, tileY),
+    ) ?? null;
   }
 
   private _createEntitySprite(entity: EntitySnapshot): Sprite {
@@ -610,6 +638,7 @@ export class GameRenderer {
       // the "I thought I disguised it" playtest foot-gun).
       if (entity.kind === "unit" && entity.faction === this.activeFaction) {
         if (entity.invisible) sprite.alpha = 0.5;
+        else if (entity.inEnemyBuilding) sprite.alpha = 0.7; // own infiltrator inside
         else if (entity.disguised) sprite.alpha = 0.8;
         else sprite.alpha = 1.0;
       } else {
@@ -1054,13 +1083,13 @@ export class GameRenderer {
       if (kind === "fieryExplosion") {
         this.config.onSpellTargetGround?.(casterId, kind, { x: tileX, y: tileY });
       } else {
-        const hit = this.lastEntities.find((e) => !this._isInsideContainer(e) && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
+        const hit = this._topHitAt(tileX, tileY);
         if (hit) this.config.onSpellTargetUnit?.(casterId, kind, hit.id);
       }
       return;
     }
 
-    const hit = this.lastEntities.find((e) => !this._isInsideContainer(e) && this._isHitVisible(e) && this._hitTest(e, tileX, tileY)) ?? null;
+    const hit = this._topHitAt(tileX, tileY);
 
     if (hit) {
       const now = Date.now();
@@ -1111,9 +1140,7 @@ export class GameRenderer {
     // Until capability filtering exists, all friendly units receive every order type
     // and the engine silently ignores orders the unit can't act on.
 
-    const hitEntity = this.lastEntities.find(
-      (e) => !this._isInsideContainer(e) && this._isHitVisible(e) && this._hitTest(e, tileX, tileY),
-    );
+    const hitEntity = this._topHitAt(tileX, tileY);
     if (hitEntity && this._fogValueAt(hitEntity.position.x, hitEntity.position.y) === 2) {
       // Builder right-clicking own under-construction building → resume construction
       if (
