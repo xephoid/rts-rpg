@@ -388,6 +388,14 @@ export function App() {
     clearPendingInfiltrateAttack();
   }, [pendingInfiltrateAttack, clearPendingInfiltrateAttack]);
 
+  const pendingConvert = useUIStore((s) => s.pendingConvert);
+  const clearPendingConvert = useUIStore((s) => s.clearPendingConvert);
+  useEffect(() => {
+    if (!pendingConvert) return;
+    engineRef.current?.issueConvertOrder(pendingConvert.casterId, pendingConvert.targetId);
+    clearPendingConvert();
+  }, [pendingConvert, clearPendingConvert]);
+
   // Diplomacy bridges (Phase 14)
   useEffect(() => {
     if (!pendingDiplomaticProposal) return;

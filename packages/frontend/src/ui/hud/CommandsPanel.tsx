@@ -17,6 +17,8 @@ import {
   robotUnitStats,
   illusionistInvisibilityResearchKey,
   ROBOT_PLATFORM_TYPES,
+  CONVERT_CASTER_TYPES,
+  convertConfig,
 } from "@neither/shared";
 import { useGameStore } from "../../store/gameStore.js";
 import { useUIStore } from "../../store/uiStore.js";
@@ -394,8 +396,34 @@ export function CommandsPanel() {
     } else if (cmd === "Patrol") {
       // Toggle patrol mode — next right-click sets destination
       setPendingPatrolIds(pendingPatrolIds ? null : selectedIds);
+    } else if (cmd === "Convert") {
+      // Find an eligible adjacent enemy unit and fire Convert. Single-target
+      // only — the button acts as "convert the nearest thing in range".
+      if (selection.mode !== "single" || !gameState) return;
+      const caster = gameState.entities.find((e) => e.id === selection.id);
+      if (!caster || !CONVERT_CASTER_TYPES.has(caster.typeKey)) return;
+      const adj = convertConfig.adjacencyRangeTiles;
+      const adjSq = adj * adj;
+      let best: typeof caster | null = null;
+      let bestD = Infinity;
+      for (const e of gameState.entities) {
+        if (e.kind !== "unit") continue;
+        if (e.faction === caster.faction) continue;
+        const dx = e.position.x - caster.position.x;
+        const dy = e.position.y - caster.position.y;
+        const d = dx * dx + dy * dy;
+        if (d <= adjSq && d < bestD) { bestD = d; best = e; }
+      }
+      if (best) useUIStore.getState().issueConvert(caster.id, best.id);
     }
   }
+
+  const selectedSingleEntity = selection.mode === "single"
+    ? gameState?.entities.find((e) => e.id === selection.id)
+    : null;
+  const isConvertCaster = !!selectedSingleEntity
+    && selectedSingleEntity.faction === activeFaction
+    && CONVERT_CASTER_TYPES.has(selectedSingleEntity.typeKey);
 
   const isPatrolActive = pendingPatrolIds !== null && pendingPatrolIds.length > 0;
 
@@ -404,7 +432,8 @@ export function CommandsPanel() {
       <div className={styles.header}>Commands</div>
       <div className={styles.grid}>
         {cmds.map((cmd) => {
-          const enabled = ENABLED_COMMANDS.has(cmd) && selectedIds.length > 0;
+          const convertEnabled = cmd === "Convert" && isConvertCaster;
+          const enabled = (ENABLED_COMMANDS.has(cmd) || convertEnabled) && selectedIds.length > 0;
           const active = cmd === "Patrol" && isPatrolActive;
           return (
             <button

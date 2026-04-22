@@ -120,7 +120,10 @@ export class UnitEntity extends Entity {
       case "attacking":    return "Attacking";
       case "buildMove":
       case "constructing": return "Constructing";
-      case "converting":   return "Converting";
+      case "converting":   {
+        const pct = Math.round((this.state.progressTicks / this.state.totalTicks) * 100);
+        return `Converting (${pct}%)`;
+      }
       case "attachMove":   return "Boarding";
       case "following":    return "Following";
       case "garrisonMove": return "Moving to Tower";

@@ -150,6 +150,12 @@ export type UIStore = {
   issueInfiltrateAttack: (platformId: string, occupantId: string) => void;
   clearPendingInfiltrateAttack: () => void;
 
+  /** Phase 15 Convert: leader/civilian fires convert on an adjacent enemy unit.
+   *  UI flow: select caster → click Convert command → click target. */
+  pendingConvert: { casterId: string; targetId: string } | null;
+  issueConvert: (casterId: string, targetId: string) => void;
+  clearPendingConvert: () => void;
+
   /** Diplomacy (Phase 14): outgoing proposal waiting to reach the engine. Single
    *  slot is fine — proposals are discrete and the UI sends them one at a time. */
   pendingDiplomaticProposal: {
@@ -304,6 +310,10 @@ export const useUIStore = create<UIStore>((set) => ({
   pendingInfiltrate: null,
   issueInfiltrate: (spyId, buildingId) => set({ pendingInfiltrate: { spyId, buildingId } }),
   clearPendingInfiltrate: () => set({ pendingInfiltrate: null }),
+
+  pendingConvert: null,
+  issueConvert: (casterId, targetId) => set({ pendingConvert: { casterId, targetId } }),
+  clearPendingConvert: () => set({ pendingConvert: null }),
 
   pendingInfiltrateAttack: null,
   issueInfiltrateAttack: (platformId, occupantId) =>
