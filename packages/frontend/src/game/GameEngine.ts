@@ -3282,15 +3282,15 @@ export class GameEngine {
     this._spellEvents.push({ kind: "fieryExplosion", casterId, casterPos: { ...caster.position }, targetPos: { ...targetPos } });
     const radius = spellEffects.fieryExplosion.radiusTiles;
     const radiusSq = radius * radius;
-    // Pad the spatial query so a building whose footprint overlaps the blast
-    // radius but whose top-left center sits just outside is still included;
-    // precise AABB-vs-point distance would need a _distanceToTarget call,
-    // but spell damage is point-radius (checks entity center), so we keep the
-    // simple Euclidean post-filter and just widen the candidate pool.
-    const candidateIds = this.spatialIndex.query(targetPos, radius + BUILDING_FOOTPRINT_PAD);
-    for (const id of candidateIds) {
-      const entity = this.entities.get(id);
-      if (!entity || entity.faction === caster.faction) continue;
+    // Linear scan over all entities. Fiery Explosion is a one-shot player
+    // action (not a per-tick hot path), so the spatial-index optimization
+    // we use for auto-aggro / detector scans isn't worth the staleness
+    // risk: an index built only on tick rebuilds can miss just-produced
+    // or just-moved entities, which manifests as "fiery explosion did
+    // nothing." A single pass through `entities.all()` is O(N) and runs
+    // only when the player casts.
+    for (const entity of this.entities.all()) {
+      if (entity.faction === caster.faction) continue;
       const ex = entity.position.x - targetPos.x;
       const ey = entity.position.y - targetPos.y;
       if (ex * ex + ey * ey > radiusSq) continue;

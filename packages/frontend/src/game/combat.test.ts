@@ -539,6 +539,45 @@ describe("Combat notifications", () => {
     expect(alerts.some((m) => m.includes("subject") && m.includes("ready"))).toBe(true);
   });
 
+  it("fiery explosion damages enemies inside its radius", () => {
+    const engine = new GameEngine({ mapSize: "small", seed: 1, onTick: () => {} });
+    engine.grantResearch("wizards", "fieryExplosion");
+    engine.getResources("wizards").mana = 1000;
+
+    const eStats = wizardUnitStats.evoker!;
+    const evoker = new UnitEntity({
+      faction: "wizards", typeKey: "evoker", position: { x: 30, y: 30 },
+      stats: {
+        maxHp: eStats.hp, damage: eStats.damage,
+        attackRange: eStats.attackRange, sightRange: eStats.sightRange,
+        speed: eStats.speed, charisma: eStats.charisma,
+        armor: eStats.armor, capacity: eStats.capacity,
+      },
+    });
+    engine.entities.add(evoker);
+
+    const sStats = robotUnitStats.spitterPlatform!;
+    const victim = new UnitEntity({
+      faction: "robots", typeKey: "spitterPlatform", position: { x: 32, y: 30 },
+      stats: {
+        maxHp: sStats.hpWood, damage: sStats.damage,
+        attackRange: sStats.attackRange, sightRange: sStats.sightRange,
+        speed: sStats.speed, charisma: sStats.charisma,
+        armor: sStats.armorWood, capacity: sStats.capacity,
+      },
+    });
+    engine.entities.add(victim);
+
+    // Do NOT stepTick — fire the spell immediately. In live play the player
+    // clicks the spell button between ticks; the engine should still find
+    // the victim because issueFieryExplosionOrder queries the spatial index
+    // which is rebuilt each tick (the previous tick's positions are used,
+    // which for a static scene are correct).
+    const hpBefore = victim.stats.hp;
+    engine.issueFieryExplosionOrder(evoker.id, { x: 32, y: 30 });
+    expect(victim.stats.hp).toBeLessThan(hpBefore);
+  });
+
   it("emits a minimap ping when a player-faction unit is under attack", () => {
     let lastSnap: { pings: { kind: string; position: { x: number; y: number } }[] } | null = null;
     const engine = new GameEngine({
