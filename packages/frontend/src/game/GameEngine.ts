@@ -1168,6 +1168,12 @@ export class GameEngine {
         const platform = this.entities.get(unit.state.platformId) as BuildingEntity | undefined;
         if (platform) unit.position = { ...platform.position };
         else unit.state = { kind: "idle" };
+      } else if (unit.state.kind === "hidingInBuilding" || unit.state.kind === "inEnemyBuilding") {
+        // If the host building is gone (destroyed between the death handler and
+        // now) the hidden unit silently reverts to idle. Belt-and-suspenders:
+        // prevents a stale-pointer hide state from persisting.
+        const host = this.entities.get(unit.state.buildingId);
+        if (!host) unit.state = { kind: "idle" };
       }
     }
   }
@@ -2348,7 +2354,22 @@ export class GameEngine {
         }
         if (building.occupantIds.size > 0) {
           for (const occupantId of [...building.occupantIds]) {
-            this.issueLeavePlatformOrder(occupantId, 1);
+            // Route by occupant state — ICP uses `inPlatform`, Cottage + Recharge
+            // Station use `hidingInBuilding`. Calling the wrong helper leaves
+            // the occupant stuck in the now-orphaned state (the old bug: an
+            // Archmage hidden in a destroyed Cottage stayed invisible forever
+            // because `issueLeavePlatformOrder` early-returns for non-inPlatform).
+            const occupant = this.entities.get(occupantId);
+            if (!occupant || occupant.kind !== "unit") continue;
+            const u = occupant as UnitEntity;
+            if (u.state.kind === "hidingInBuilding") {
+              this.issueLeaveHidingOrder(occupantId);
+            } else if (u.state.kind === "inPlatform") {
+              this.issueLeavePlatformOrder(occupantId, 1);
+            } else if (u.state.kind === "inEnemyBuilding") {
+              // Infiltrator in a dying enemy Cottage — drop to idle on the spot.
+              u.state = { kind: "idle" };
+            }
           }
         }
       }

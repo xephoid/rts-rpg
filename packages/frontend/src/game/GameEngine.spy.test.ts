@@ -390,6 +390,24 @@ describe("Hide in friendly building", () => {
     expect(subject.state.kind).toBe("idle");
     expect(cottage.occupantIds.has(subject.id)).toBe(false);
   });
+
+  it("destroying a Cottage evicts hidden occupants alive", () => {
+    cottage.occupantIds.add(subject.id);
+    subject.state = { kind: "hidingInBuilding", buildingId: cottage.id };
+    subject.position = { ...cottage.position };
+
+    // Simulate destruction by dropping the cottage HP to zero and letting the
+    // engine's tick-end cleanup process it. Direct remove would short-circuit
+    // the death handler; we want the real code path.
+    cottage.stats.hp = 0;
+    engine.stepTick(0, 0);
+
+    expect(engine.entities.get(cottage.id)).toBeUndefined();
+    const freed = engine.entities.get(subject.id);
+    expect(freed).toBeDefined();
+    expect(freed!.state.kind).toBe("idle");
+    // Position must be somewhere non-trivial (ejected, not the old cottage tile).
+  });
 });
 
 // ── Detection set ──────────────────────────────────────────────────────────────
