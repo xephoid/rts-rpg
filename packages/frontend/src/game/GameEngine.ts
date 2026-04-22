@@ -630,7 +630,7 @@ export class GameEngine {
       if (!hasReq) return;
     }
 
-    const costs = building.faction === "wizards" ? wizardUnitCosts : robotUnitCosts;
+    const costs = this._unitCostsFor(building.faction);
     const cost = costs[unitTypeKey];
     if (!cost) return;
 
@@ -651,14 +651,16 @@ export class GameEngine {
     // Also skip the pop-cap check entirely when the unit being queued doesn't consume pop
     if (cap > 0 && consumesPop(unitTypeKey) && count + pendingPop >= cap) return;
 
-    // Dragon Hoard gate: each operational Hoard supports exactly one Dragon
-    if (unitTypeKey === "dragon" && building.faction === "wizards") {
-      const hoardCount = this.entities.buildingsByFaction("wizards")
+    // Dragon Hoard gate: each operational Hoard supports exactly one Dragon.
+    // Count per-faction so a 4/6-player match with multiple wizard slots doesn't
+    // share hoards across factions.
+    if (unitTypeKey === "dragon" && this.factionSpecies[building.faction] === "wizards") {
+      const hoardCount = this.entities.buildingsByFaction(building.faction)
         .filter((b) => b.typeKey === "dragonHoard" && b.isOperational).length;
-      const liveDragons = this.entities.unitsByFaction("wizards")
+      const liveDragons = this.entities.unitsByFaction(building.faction)
         .filter((u) => u.typeKey === "dragon").length;
       let queuedDragons = 0;
-      for (const b of this.entities.buildingsByFaction("wizards")) {
+      for (const b of this.entities.buildingsByFaction(building.faction)) {
         if (b.state.kind === "producing" && b.state.unitTypeKey === "dragon") queuedDragons++;
         queuedDragons += b.productionQueue.filter((k) => k === "dragon").length;
       }
@@ -687,7 +689,7 @@ export class GameEngine {
     if (!entity || entity.kind !== "building") return;
     const building = entity as BuildingEntity;
 
-    const costs = building.faction === "wizards" ? wizardUnitCosts : robotUnitCosts;
+    const costs = this._unitCostsFor(building.faction);
     const res = this.resources[building.faction];
 
     if (building.state.kind === "producing") {
@@ -1078,7 +1080,7 @@ export class GameEngine {
 
     if (!this._isValidBuildSite(unit.faction, buildingTypeKey, topLeft)) return;
 
-    const costs = unit.faction === "wizards" ? wizardBuildingCosts : robotBuildingCosts;
+    const costs = this._buildingCostsFor(unit.faction);
     const cost = costs[buildingTypeKey];
     if (!cost) return;
 
@@ -1087,7 +1089,7 @@ export class GameEngine {
     res.wood -= cost.wood;
     res.water -= cost.water;
 
-    const factionStats = unit.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const factionStats = this._buildingStatsFor(unit.faction);
     const bStats = factionStats[buildingTypeKey];
     if (!bStats) return;
 
@@ -1123,7 +1125,7 @@ export class GameEngine {
   }
 
   private _isValidBuildSite(faction: Faction, buildingTypeKey: string, topLeft: Vec2): boolean {
-    const factionStats = faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const factionStats = this._buildingStatsFor(faction);
     const fp = factionStats[buildingTypeKey]?.footprintTiles ?? 1;
     for (let dy = 0; dy < fp; dy++) {
       for (let dx = 0; dx < fp; dx++) {
@@ -1233,7 +1235,7 @@ export class GameEngine {
   }
 
   private _unblockBuildingTiles(building: BuildingEntity): void {
-    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const factionStats = this._buildingStatsFor(building.faction);
     const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
     const bx = Math.floor(building.position.x);
     const by = Math.floor(building.position.y);
@@ -2052,7 +2054,7 @@ export class GameEngine {
    * `fromPos`. Used for dropoff pathing so units don't always beeline to the top-left corner.
    */
   private _nearestBuildingEntryPoint(building: BuildingEntity, fromPos: Vec2): Vec2 | null {
-    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const factionStats = this._buildingStatsFor(building.faction);
     const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
     const bx = Math.floor(building.position.x);
     const by = Math.floor(building.position.y);
@@ -2117,6 +2119,24 @@ export class GameEngine {
     }
   }
 
+  // ── Species dispatch helpers (N-faction support) ─────────────────────────────
+  // Every per-faction balance table is keyed on species. Slots 3-6 may play
+  // either species, so anywhere we used to do `faction === "wizards" ? wizX :
+  // robX` we now route through these helpers so the correct table is chosen
+  // regardless of slot ID.
+  private _buildingStatsFor(faction: Faction) {
+    return this.factionSpecies[faction] === "wizards" ? wizardBuildingStats : robotBuildingStats;
+  }
+  private _buildingCostsFor(faction: Faction) {
+    return this.factionSpecies[faction] === "wizards" ? wizardBuildingCosts : robotBuildingCosts;
+  }
+  private _unitCostsFor(faction: Faction) {
+    return this.factionSpecies[faction] === "wizards" ? wizardUnitCosts : robotUnitCosts;
+  }
+  private _unitStatsFor(faction: Faction) {
+    return this.factionSpecies[faction] === "wizards" ? wizardUnitStats : robotUnitStats;
+  }
+
   // ── Production ────────────────────────────────────────────────────────────────
 
   private _processProduction(): void {
@@ -2151,7 +2171,7 @@ export class GameEngine {
     let canAttackAir = false;
     let cannotBeConverted = false;
 
-    if (building.faction === "wizards") {
+    if (this.factionSpecies[building.faction] === "wizards") {
       const ws = wizardUnitStats[unitTypeKey];
       if (ws) {
         stats = { maxHp: ws.hp, damage: ws.damage, attackRange: ws.attackRange, sightRange: ws.sightRange, speed: ws.speed, charisma: ws.charisma, armor: ws.armor, capacity: ws.capacity };
@@ -2162,7 +2182,7 @@ export class GameEngine {
     } else {
       const rs = robotUnitStats[unitTypeKey];
       if (rs) {
-        const metalUnlocked = this._completedResearch.get("robots")?.has("woodToMetal") ?? false;
+        const metalUnlocked = this._completedResearch.get(building.faction)?.has("woodToMetal") ?? false;
         stats = {
           maxHp: metalUnlocked ? rs.hpMetal : rs.hpWood,
           damage: rs.damage,
@@ -2193,15 +2213,15 @@ export class GameEngine {
       canAttackAir,
       cannotBeConverted,
     });
-    if (building.faction === "robots") {
-      const metalUnlocked = this._completedResearch.get("robots")?.has("woodToMetal") ?? false;
+    if (this.factionSpecies[building.faction] === "robots") {
+      const metalUnlocked = this._completedResearch.get(building.faction)?.has("woodToMetal") ?? false;
       unit.materialType = metalUnlocked ? "metal" : "wood";
     }
     this.entities.add(unit);
   }
 
   private _findSpawnTile(building: BuildingEntity, isFlying = false): Vec2 | null {
-    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const factionStats = this._buildingStatsFor(building.faction);
     const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
     const bx = Math.floor(building.position.x);
     const by = Math.floor(building.position.y);
@@ -2337,9 +2357,7 @@ export class GameEngine {
         ranged: unit.stats.attackRange > 1,
       });
 
-      const statConfig = unit.faction === "wizards"
-        ? wizardUnitStats[unit.typeKey]
-        : robotUnitStats[unit.typeKey];
+      const statConfig = this._unitStatsFor(unit.faction)[unit.typeKey];
       unit.attackCooldownTicks = Math.round((statConfig?.attackIntervalSec ?? 1.0) * TICKS_PER_SEC);
 
       if (target.stats.hp <= 0) {
@@ -2444,7 +2462,10 @@ export class GameEngine {
       if (entity.isNamed) {
         // Determine killer's faction for victory credit
         const killer = killerId ? this.entities.get(killerId) : null;
-        const winFaction: Faction = killer ? killer.faction : (entity.faction === "wizards" ? "robots" : "wizards");
+        // Unattributed kills: credit the first other active faction as a
+        // best-effort fallback. Named leaders normally die to a tracked attacker.
+        const fallbackWinner = this.activeFactions.find((f) => f !== entity.faction) ?? entity.faction;
+        const winFaction: Faction = killer ? killer.faction : fallbackWinner;
         this.events.queue("VictoryAlert", { faction: winFaction, condition: "military", pct: 100 });
       }
     } else if (entity.kind === "building") {
@@ -2502,11 +2523,21 @@ export class GameEngine {
   // ── Mana ─────────────────────────────────────────────────────────────────────
 
   private _processMana(): void {
-    const res = this.resources.wizards;
-    const wizardUnits = this.entities.unitsByFaction("wizards").filter(
+    // Run the mana economy per wizard-species faction slot so f3-f6 wizard
+    // factions generate + spend mana on their own pool, not the legacy "wizards"
+    // slot's pool.
+    for (const faction of this.activeFactions) {
+      if (this.factionSpecies[faction] !== "wizards") continue;
+      this._processManaForFaction(faction);
+    }
+  }
+
+  private _processManaForFaction(faction: Faction): void {
+    const res = this.resources[faction];
+    const wizardUnits = this.entities.unitsByFaction(faction).filter(
       (u) => WIZARD_UNIT_TYPES.has(u.typeKey) && u.state.kind !== "platformShell",
     );
-    const reservoirs = this.entities.buildingsByFaction("wizards").filter(
+    const reservoirs = this.entities.buildingsByFaction(faction).filter(
       (b) => b.typeKey === "manaReservoir" && b.isOperational,
     );
 
@@ -2582,6 +2613,11 @@ export class GameEngine {
   /** The active-faction roster for this match (2/4/6 depending on map size). */
   getActiveFactions(): readonly Faction[] {
     return this.activeFactions;
+  }
+
+  /** True once `researchKey` has been permanently unlocked for `faction`. */
+  hasCompletedResearch(faction: Faction, researchKey: string): boolean {
+    return this._completedResearch.get(faction)?.has(researchKey) ?? false;
   }
 
   /** True while a non-combat treaty is active between two factions. */
@@ -2771,8 +2807,8 @@ export class GameEngine {
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
     if (!WIZARD_UNIT_TYPES.has(unit.typeKey)) return;
-    if (!this._completedResearch.get("wizards")?.has("manaShield")) return;
-    if (!unit.manaShielded && this.resources.wizards.mana <= 0) return;
+    if (!this._completedResearch.get(unit.faction)?.has("manaShield")) return;
+    if (!unit.manaShielded && this.resources[unit.faction].mana <= 0) return;
     unit.manaShielded = !unit.manaShielded;
   }
 
@@ -2781,8 +2817,8 @@ export class GameEngine {
     if (!entity || entity.kind !== "unit") return;
     const unit = entity as UnitEntity;
     if (unit.typeKey !== "illusionist") return;
-    if (!this._completedResearch.get("wizards")?.has(illusionistInvisibilityResearchKey)) return;
-    if (!unit.invisibilityActive && this.resources.wizards.mana <= 0) return;
+    if (!this._completedResearch.get(unit.faction)?.has(illusionistInvisibilityResearchKey)) return;
+    if (!unit.invisibilityActive && this.resources[unit.faction].mana <= 0) return;
     unit.invisibilityActive = !unit.invisibilityActive;
     // Deliberately do NOT mirror into `concealed`: an invisible Illusionist must still
     // contribute its sight range to the owner's fog of war. `invisibilityActive` alone
@@ -2797,7 +2833,7 @@ export class GameEngine {
     const unit = entity as UnitEntity;
     if (unit.typeKey !== "infiltrationPlatform") return;
     // Target typeKey must belong to the opposing faction's unit roster.
-    const enemyRoster = unit.faction === "robots" ? wizardUnitStats : robotUnitStats;
+    const enemyRoster = this.factionSpecies[unit.faction] === "robots" ? wizardUnitStats : robotUnitStats;
     if (!(targetTypeKey in enemyRoster)) return;
     unit.disguiseActive = true;
     unit.disguiseTargetTypeKey = targetTypeKey;
@@ -2815,15 +2851,15 @@ export class GameEngine {
   issueIceBlastOrder(casterId: string, targetId: string): void {
     const caster = this.entities.get(casterId) as UnitEntity | undefined;
     if (!caster || caster.kind !== "unit" || caster.typeKey !== "evoker") return;
-    if (!this._completedResearch.get("wizards")?.has("iceBlast")) return;
-    if (this.resources.wizards.mana < spellCosts.iceBlastMana) return;
+    if (!this._completedResearch.get(caster.faction)?.has("iceBlast")) return;
+    if (this.resources[caster.faction].mana < spellCosts.iceBlastMana) return;
     const target = this.entities.get(targetId);
-    if (!target || target.faction === "wizards") return;
+    if (!target || target.faction === caster.faction) return;
     const dx = target.position.x - caster.position.x;
     const dy = target.position.y - caster.position.y;
     if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
 
-    this.resources.wizards.mana -= spellCosts.iceBlastMana;
+    this.resources[caster.faction].mana -= spellCosts.iceBlastMana;
     this._spellEvents.push({ kind: "iceBlast", casterId, casterPos: { ...caster.position }, targetId, targetPos: { ...target.position } });
     const t = target as UnitEntity;
     if (t.slowTicksRemaining === 0) t.baseSpeed = t.stats.speed;
@@ -2834,17 +2870,17 @@ export class GameEngine {
   issueFieryExplosionOrder(casterId: string, targetPos: Vec2): void {
     const caster = this.entities.get(casterId) as UnitEntity | undefined;
     if (!caster || caster.kind !== "unit" || caster.typeKey !== "evoker") return;
-    if (!this._completedResearch.get("wizards")?.has("fieryExplosion")) return;
-    if (this.resources.wizards.mana < spellCosts.fieryExplosionMana) return;
+    if (!this._completedResearch.get(caster.faction)?.has("fieryExplosion")) return;
+    if (this.resources[caster.faction].mana < spellCosts.fieryExplosionMana) return;
     const dx = targetPos.x - caster.position.x;
     const dy = targetPos.y - caster.position.y;
     if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
 
-    this.resources.wizards.mana -= spellCosts.fieryExplosionMana;
+    this.resources[caster.faction].mana -= spellCosts.fieryExplosionMana;
     this._spellEvents.push({ kind: "fieryExplosion", casterId, casterPos: { ...caster.position }, targetPos: { ...targetPos } });
     const radiusSq = spellEffects.fieryExplosion.radiusTiles ** 2;
     for (const entity of [...this.entities.all()]) {
-      if (entity.faction === "wizards") continue;
+      if (entity.faction === caster.faction) continue;
       const ex = entity.position.x - targetPos.x;
       const ey = entity.position.y - targetPos.y;
       if (ex * ex + ey * ey > radiusSq) continue;
@@ -2857,15 +2893,15 @@ export class GameEngine {
   issueEnlargeOrder(casterId: string, targetId: string): void {
     const caster = this.entities.get(casterId) as UnitEntity | undefined;
     if (!caster || caster.kind !== "unit" || caster.typeKey !== "enchantress") return;
-    if (!this._completedResearch.get("wizards")?.has("strengthenAlly")) return;
-    if (this.resources.wizards.mana < spellCosts.enlargeMana) return;
+    if (!this._completedResearch.get(caster.faction)?.has("strengthenAlly")) return;
+    if (this.resources[caster.faction].mana < spellCosts.enlargeMana) return;
     const target = this.entities.get(targetId);
-    if (!target || target.kind !== "unit" || target.faction !== "wizards") return;
+    if (!target || target.kind !== "unit" || target.faction !== caster.faction) return;
     const dx = target.position.x - caster.position.x;
     const dy = target.position.y - caster.position.y;
     if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
 
-    this.resources.wizards.mana -= spellCosts.enlargeMana;
+    this.resources[caster.faction].mana -= spellCosts.enlargeMana;
     this._spellEvents.push({ kind: "enlarge", casterId, casterPos: { ...caster.position }, targetId, targetPos: { ...target.position } });
     const t = target as UnitEntity;
     t.damageBonusMultiplier = 1 + spellEffects.enlarge.damageBonusPct / 100;
@@ -2875,15 +2911,15 @@ export class GameEngine {
   issueReduceOrder(casterId: string, targetId: string): void {
     const caster = this.entities.get(casterId) as UnitEntity | undefined;
     if (!caster || caster.kind !== "unit" || caster.typeKey !== "enchantress") return;
-    if (!this._completedResearch.get("wizards")?.has("weakenFoe")) return;
-    if (this.resources.wizards.mana < spellCosts.reduceMana) return;
+    if (!this._completedResearch.get(caster.faction)?.has("weakenFoe")) return;
+    if (this.resources[caster.faction].mana < spellCosts.reduceMana) return;
     const target = this.entities.get(targetId);
-    if (!target || target.faction === "wizards") return;
+    if (!target || target.faction === caster.faction) return;
     const dx = target.position.x - caster.position.x;
     const dy = target.position.y - caster.position.y;
     if (Math.sqrt(dx * dx + dy * dy) > caster.stats.attackRange) return;
 
-    this.resources.wizards.mana -= spellCosts.reduceMana;
+    this.resources[caster.faction].mana -= spellCosts.reduceMana;
     this._spellEvents.push({ kind: "reduce", casterId, casterPos: { ...caster.position }, targetId, targetPos: { ...target.position } });
     const t = target as UnitEntity;
     t.damageBonusMultiplier = 1 - spellEffects.reduce.damagePenaltyPct / 100;
@@ -3064,7 +3100,7 @@ export class GameEngine {
   }
 
   private _blockBuildingTiles(building: BuildingEntity): void {
-    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const factionStats = this._buildingStatsFor(building.faction);
     const fp = factionStats[building.typeKey]?.footprintTiles ?? 2;
     const bx = Math.floor(building.position.x);
     const by = Math.floor(building.position.y);
@@ -3138,7 +3174,7 @@ export class GameEngine {
     }
     for (const building of this.entities.buildings()) {
       if (!building.isOperational) continue;
-      const speciesStats = this.factionSpecies[building.faction] === "wizards" ? wizardBuildingStats : robotBuildingStats;
+      const speciesStats = this._buildingStatsFor(building.faction);
       const support = speciesStats[building.typeKey]?.populationSupport ?? 0;
       result[building.faction].cap += support;
     }
@@ -3407,9 +3443,7 @@ export class GameEngine {
   private _targetSizeRangeBonus(target: Entity): number {
     if (target.kind !== "unit") return 0; // building distance uses AABB, no bonus needed
     const t = target as UnitEntity;
-    const stats = t.faction === "wizards"
-      ? wizardUnitStats[t.typeKey]
-      : robotUnitStats[t.typeKey];
+    const stats = this._unitStatsFor(t.faction)[t.typeKey];
     const fp = stats?.footprintTiles ?? 1;
     return Math.max(0, (fp - 1) * 0.5);
   }
@@ -3427,9 +3461,7 @@ export class GameEngine {
     const ay = attacker.y + 0.5;
     if (target.kind === "building") {
       const b = target as BuildingEntity;
-      const stats = b.faction === "wizards"
-        ? wizardBuildingStats[b.typeKey]
-        : robotBuildingStats[b.typeKey];
+      const stats = this._buildingStatsFor(b.faction)[b.typeKey];
       const fp = stats?.footprintTiles ?? 1;
       const bx1 = target.position.x;
       const by1 = target.position.y;
@@ -3547,7 +3579,7 @@ export class GameEngine {
   }
 
   private _buildingVisionRange(building: BuildingEntity): number {
-    const factionStats = building.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
+    const factionStats = this._buildingStatsFor(building.faction);
     const base = factionStats[building.typeKey]?.visionRange ?? 3;
     if (building.typeKey === "immobileCombatPlatform") {
       return base + building.occupantIds.size * immobileCombatPlatformConfig.perCoreVision;

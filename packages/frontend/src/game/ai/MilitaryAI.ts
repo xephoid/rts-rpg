@@ -67,6 +67,7 @@ export interface AIEngineInterface {
   hasNonCombatTreaty(a: Faction, b: Faction): boolean;
   getFactionStats(faction: Faction): FactionStats;
   getActiveFactions(): readonly Faction[];
+  hasCompletedResearch(faction: Faction, researchKey: string): boolean;
 }
 
 // ── Faction roles ───────────────────────────────────────────────────────────
@@ -626,7 +627,7 @@ export class MilitaryAI {
     // production so the home can drain its queue and transition to idle. Without
     // this, the home is perpetually in `producing` state and the engine rejects
     // the research request forever.
-    const pendingResearchAtHome = this._hasPendingResearchAt(roles.home, ctx);
+    const pendingResearchAtHome = this._hasPendingResearchAt(roles.home, ctx, engine);
 
     // Per-gatherer live counts (keyed by typeKey).
     const gathererCount: Record<string, number> = {};
@@ -877,9 +878,14 @@ export class MilitaryAI {
   /** True when `_advanceResearchPriority` *would* fire against a building of the
    *  given host typeKey this tick — used by maintenance logic to pause non-critical
    *  queueing on that host so its queue drains and research can actually start. */
-  private _hasPendingResearchAt(hostTypeKey: string, ctx: Ctx): boolean {
+  private _hasPendingResearchAt(hostTypeKey: string, ctx: Ctx, engine: AIEngineInterface): boolean {
     const roles = SPECIES_ROLES[this.species];
     for (const researchKey of roles.researchPriority) {
+      // Items already permanently unlocked shouldn't keep gating the maintenance
+      // queue — without this check, `pendingResearchAtHome` stays true forever
+      // after a single item completes (the old logic only treated "in progress"
+      // as done) and the Core-topping-up pipeline seizes.
+      if (engine.hasCompletedResearch(this.faction, researchKey)) continue;
       const cost = researchCosts[researchKey as keyof typeof researchCosts];
       if (!cost) continue;
       const hostForItem = Object.keys(buildingResearch).find(
@@ -1382,8 +1388,9 @@ function _findBuildSite(
   near: Vec2,
   existingBuildings: BuildingEntity[] = [],
 ): Vec2 | null {
-  const factionStats = faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
-  const fp = factionStats[typeKey]?.footprintTiles ?? 2;
+  // Building typeKeys are disjoint across the two species, so a union lookup
+  // works for any faction slot (f3-f6 included) without threading species in.
+  const fp = (wizardBuildingStats[typeKey] ?? robotBuildingStats[typeKey])?.footprintTiles ?? 2;
   let fallback: Vec2 | null = null;
 
   for (let radius = fp + 1; radius <= 30; radius++) {
@@ -1415,8 +1422,7 @@ function _isTooCloseToBuilding(
   const ax1 = pos.x, ay1 = pos.y;
   const ax2 = pos.x + fp - 1, ay2 = pos.y + fp - 1;
   for (const b of buildings) {
-    const bStats = b.faction === "wizards" ? wizardBuildingStats : robotBuildingStats;
-    const bFp = bStats[b.typeKey]?.footprintTiles ?? 2;
+    const bFp = (wizardBuildingStats[b.typeKey] ?? robotBuildingStats[b.typeKey])?.footprintTiles ?? 2;
     const bx1 = Math.floor(b.position.x);
     const by1 = Math.floor(b.position.y);
     const bx2 = bx1 + bFp - 1;
