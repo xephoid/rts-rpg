@@ -24,9 +24,11 @@ export const robotBuildingAssets: Record<string, string> = {
   waterExtractor: "/robot/buildings/water_extractor.png",
   woodStorage: "/robot/buildings/wood_storage.png",
   combatFrameProduction: "/robot/buildings/combat_frame_production.png",
-  combatResearchStation: "/robot/buildings/combat_research_station.png",
+  // Asset files still carry their original filenames; rename the PNGs here if you
+  // author replacements with the new names.
+  aerialFrameProduction: "/robot/buildings/combat_research_station.png",
   diplomaticResearchStation: "/robot/buildings/diplomatic_research_station.png",
-  defensiveResearchStation: "/robot/buildings/defensive_research_station.png",
+  defenseFrameProduction: "/robot/buildings/defensive_research_station.png",
   thirdSpace: "/robot/buildings/third_space.png",
 };
 

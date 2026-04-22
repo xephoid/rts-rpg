@@ -198,8 +198,8 @@ type CompEntry = { typeKey: string; weight: number };
  * Probe Platform (robots) are intentionally excluded — they're special-use utility
  * units rather than main-line combat. Advanced picks become producible only once the
  * AI has built the relevant unlock (enchantress → libraryOfEnchantment, cleric →
- * temple, dragon → dragonHoard, largeCombatPlatform → combatResearchStation,
- * wallPlatform → defensiveResearchStation). _queueCombatComposition filters the
+ * temple, dragon → dragonHoard, largeCombatPlatform → combatFrameProduction,
+ * wallPlatform → defenseFrameProduction). _queueCombatComposition filters the
  * composition to what can actually be produced right now, so early waves are
  * Evoker-only / Spinner+Spitter-only and waves grow richer as tech comes online.
  */
@@ -220,8 +220,8 @@ const ROBOT_ARMY_COMPOSITION: readonly CompEntry[] = [
   { typeKey: "spitterPlatform",     weight: 48 },
   { typeKey: "spinnerPlatform",     weight: 28 },
   { typeKey: "largeCombatPlatform", weight: 19 },
-  // Low-weight anti-air / mobility pick. Produced at Combat Research Station along
-  // with the Large Combat Platform, so it comes online with the same tech gate.
+  // Low-weight anti-air / mobility pick. Produced at Aerial Frame Production,
+  // gated behind a separate tech building from the main combat platforms.
   { typeKey: "stingerPlatform",     weight: 5 },
 ];
 

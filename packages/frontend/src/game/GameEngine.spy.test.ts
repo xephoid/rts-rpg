@@ -403,7 +403,7 @@ describe("Hide in friendly building", () => {
     engine.stepTick(0, 0);
 
     expect(engine.entities.get(cottage.id)).toBeUndefined();
-    const freed = engine.entities.get(subject.id);
+    const freed = engine.entities.get(subject.id) as UnitEntity | undefined;
     expect(freed).toBeDefined();
     expect(freed!.state.kind).toBe("idle");
     // Position must be somewhere non-trivial (ejected, not the old cottage tile).

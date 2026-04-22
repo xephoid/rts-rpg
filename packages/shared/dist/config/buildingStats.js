@@ -9,10 +9,10 @@
 export const buildingProduction = {
     // Robot buildings — each research building IS the production building for its unit type
     home: ["core", "waterCollectionPlatform", "woodChopperPlatform", "movableBuildKitPlatform"],
-    combatFrameProduction: ["spinnerPlatform", "spitterPlatform"],
-    combatResearchStation: ["largeCombatPlatform", "stingerPlatform"],
-    diplomaticResearchStation: ["infiltrationPlatform", "probePlatform"],
-    defensiveResearchStation: ["wallPlatform"],
+    combatFrameProduction: ["spinnerPlatform", "spitterPlatform", "largeCombatPlatform"],
+    aerialFrameProduction: ["probePlatform", "stingerPlatform"],
+    diplomaticResearchStation: ["infiltrationPlatform"],
+    defenseFrameProduction: ["wallPlatform"],
     // Wizard buildings — all units produced at castle; libraries/special buildings are existence-only unlocks
     castle: ["subject", "surf", "evoker", "illusionist", "enchantress", "dragon", "cleric"],
 };
@@ -80,8 +80,8 @@ export const factionBuildableBuildings = {
     robots: [
         "home",
         "rechargeStation", "immobileCombatPlatform", "waterExtractor", "woodStorage",
-        "combatFrameProduction", "combatResearchStation", "diplomaticResearchStation",
-        "defensiveResearchStation", "thirdSpace",
+        "combatFrameProduction", "aerialFrameProduction", "diplomaticResearchStation",
+        "defenseFrameProduction", "thirdSpace",
     ],
 };
 // ── Robot buildings ───────────────────────────────────────────────────────────
@@ -135,8 +135,8 @@ export const robotBuildingStats = {
         footprintTiles: 3,
         populationSupport: 4,
     },
-    combatResearchStation: {
-        // Initial guess: research building.
+    aerialFrameProduction: {
+        // Initial guess: aerial-unit production building (Probe + Stinger).
         hp: 220,
         occupantCapacity: 2,
         visionRange: 4,
@@ -151,8 +151,8 @@ export const robotBuildingStats = {
         footprintTiles: 2,
         populationSupport: 0,
     },
-    defensiveResearchStation: {
-        // Initial guess: defensive upgrades building.
+    defenseFrameProduction: {
+        // Initial guess: defensive-unit production building (Wall Platform).
         hp: 220,
         occupantCapacity: 2,
         visionRange: 4,
